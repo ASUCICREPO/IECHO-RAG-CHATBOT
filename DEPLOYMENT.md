@@ -37,7 +37,7 @@ Ensure your AWS user/role has permissions for:
 
 ```bash
 export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-export CDK_DEFAULT_REGION=us-east-1  # or your preferred region
+export CDK_DEFAULT_REGION=us-west-2  # or your preferred region
 ```
 
 ## Step 2: Deploy Infrastructure

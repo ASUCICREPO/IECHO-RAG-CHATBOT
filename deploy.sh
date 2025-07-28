@@ -44,7 +44,7 @@ fi
 
 # Set environment variables
 export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
-export CDK_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+export CDK_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-west-2}
 
 if [ -z "$CDK_DEFAULT_ACCOUNT" ]; then
     print_error "Unable to get AWS account ID. Please check your AWS CLI configuration."

@@ -189,7 +189,7 @@ List processed documents in the knowledge base.
 
 **CDK Infrastructure:**
 - `CDK_DEFAULT_ACCOUNT`: AWS account ID
-- `CDK_DEFAULT_REGION`: AWS region (default: us-east-1)
+- `CDK_DEFAULT_REGION`: AWS region (default: us-west-2)
 
 ### AWS Services Configuration
 

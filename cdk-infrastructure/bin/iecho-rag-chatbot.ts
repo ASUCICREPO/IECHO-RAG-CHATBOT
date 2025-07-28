@@ -10,7 +10,7 @@ const app = new cdk.App();
 const stack = new IEchoRagChatbotStack(app, 'IEchoRagChatbotStack', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION || 'us-east-1',
+    region: process.env.CDK_DEFAULT_REGION || 'us-west-2',
   },
   description: 'iECHO RAG Chatbot - Multi-modal document processing and AI-powered chat system',
 });
