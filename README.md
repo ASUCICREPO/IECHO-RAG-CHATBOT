@@ -1,6 +1,19 @@
-# iECHO RAG Chatbot Backend API
+# iECHO RAG Chatbot
 
 A comprehensive AI-powered document processing and chat API built on AWS, featuring multi-modal document ingestion, vector search, and intelligent conversational AI powered by Amazon Bedrock.
+
+## Project Structure
+
+```
+iECHO-RAG-CHATBOT/
+├── backend/                    # Backend infrastructure and services
+│   ├── cdk-infrastructure/     # AWS CDK infrastructure code
+│   ├── deploy.sh              # Automated deployment script
+│   ├── cleanup.sh             # Infrastructure cleanup script
+│   └── README.md              # Backend-specific documentation
+├── README.md                  # This file - main project overview
+└── PROJECT_STRUCTURE.md       # Detailed project structure documentation
+```
 
 ## Architecture Overview
 
@@ -36,6 +49,7 @@ This system implements a modern RAG (Retrieval-Augmented Generation) backend arc
 - 🚀 **Serverless Architecture**: Auto-scaling and cost-effective
 - 🔒 **Security**: AWS IAM, encryption at rest and in transit
 - 📈 **Monitoring**: CloudWatch integration for observability
+- 💰 **Cost Optimized**: VPC endpoints instead of NAT Gateway (~$7/month vs ~$45/month)
 
 ## Quick Start
 
@@ -44,37 +58,57 @@ This system implements a modern RAG (Retrieval-Augmented Generation) backend arc
 - AWS CLI configured with appropriate permissions
 - Node.js 18+ and npm
 - AWS CDK CLI installed (`npm install -g aws-cdk`)
+- jq installed for JSON parsing (`brew install jq` on macOS, `apt-get install jq` on Ubuntu)
 
-### 1. Deploy Infrastructure
+### 1. Deploy Backend Infrastructure
 
 ```bash
-# Use the deployment script
-./deploy.sh
+# Navigate to backend directory
+cd backend
 
-# Or deploy manually
+# Deploy CDK infrastructure only (no Knowledge Base creation)
 cd cdk-infrastructure
 npm install
 cdk bootstrap  # First time only
-cdk deploy
+cdk deploy --require-approval never
 ```
 
-### 2. Upload Documents
+**Note**: The `deploy.sh` script is designed for CLI-based Knowledge Base creation, but since S3 Vectors requires manual setup through the AWS Console, we use the manual approach below.
 
-After deployment, upload your documents to the S3 bucket:
+### 2. Create Knowledge Base Manually
 
-1. Navigate to the AWS Console → S3
-2. Find the bucket named `iecho-documents-{account}-{region}`
-3. Upload PDF or PowerPoint files to the `uploads/` folder
-4. The system will automatically process and index the documents
+Since S3 Vectors is not yet supported in AWS CLI, create the Knowledge Base manually:
 
-### 3. Enable Bedrock Models
+```bash
+# Follow the detailed guide
+cd backend
+cat MANUAL_KB_SETUP.md
+```
+
+**Quick Steps:**
+1. Go to AWS Console → Bedrock → Knowledge bases → Create
+2. Use S3 Vectors with the deployed bucket: `iecho-vectors-138681986761-us-west-2`
+3. Create data source pointing to: `s3://iecho-documents-138681986761-us-west-2/processed/`
+4. Copy the Knowledge Base ID and Data Source ID
+
+### 3. Update Configuration
+
+```bash
+# Run the configuration update script
+cd backend
+./update-configs.sh
+
+# Enter the Knowledge Base ID and Data Source ID when prompted
+```
+
+### 4. Enable Bedrock Models
 
 1. Go to AWS Console → Bedrock → Model access
 2. Enable access to:
+   - Amazon Titan Embed Text v2
    - Amazon Nova Lite
-   - Titan Multimodal Embedding
 
-### 4. Test the API
+### 5. Test the API
 
 ```bash
 # Health check
@@ -244,7 +278,7 @@ The CDK stack automatically configures:
 
 ```bash
 # CDK development
-cd cdk-infrastructure
+cd backend/cdk-infrastructure
 npm run watch
 ```
 
@@ -252,7 +286,7 @@ npm run watch
 
 ```bash
 # CDK tests
-cd cdk-infrastructure
+cd backend/cdk-infrastructure
 npm test
 ```
 

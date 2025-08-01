@@ -1,20 +1,21 @@
 import * as cdk from 'aws-cdk-lib';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as apigatewayv2_integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as eks from 'aws-cdk-lib/aws-eks';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import { Construct } from 'constructs';
 import { NagSuppressions } from 'cdk-nag';
 
-// AWS Solutions Constructs
-import { S3ToLambda } from '@aws-solutions-constructs/aws-s3-lambda';
-
-// GenAI CDK Constructs
+// GenAI CDK Constructs for enhanced features
 import * as genai from '@cdklabs/generative-ai-cdk-constructs';
 
 export class IEchoRagChatbotStack extends cdk.Stack {
@@ -39,15 +40,8 @@ export class IEchoRagChatbotStack extends cdk.Stack {
       }],
     });
 
-    // Vector store bucket for Bedrock Knowledge Base
-    const vectorStoreBucket = new s3.Bucket(this, 'VectorStoreBucket', {
-      bucketName: `iecho-vector-store-${this.account}-${this.region}`,
-      versioned: true,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      removalPolicy: cdk.RemovalPolicy.DESTROY, // For development
-      autoDeleteObjects: true, // For development
-    });
+    // Note: Vector storage is handled automatically by Bedrock when using S3 Vectors
+    // Bedrock creates and manages its own S3 bucket for vector storage
 
     // DynamoDB table for user feedback and response ratings
     const feedbackTable = new dynamodb.Table(this, 'FeedbackTable', {
@@ -67,71 +61,59 @@ export class IEchoRagChatbotStack extends cdk.Stack {
     });
 
     // ========================================
-    // 2. BEDROCK KNOWLEDGE BASE WITH DATA AUTOMATION
+    // 2. IAM ROLES FOR BEDROCK KNOWLEDGE BASE
     // ========================================
 
-    // Create Bedrock Knowledge Base with S3 vector store and Data Automation
-    const knowledgeBase = new genai.bedrock.KnowledgeBase(this, 'IEchoKnowledgeBase', {
-      name: 'iecho-multimodal-kb',
-      description: 'Knowledge base for iECHO multi-modal document processing with Bedrock Data Automation',
-      embeddingModel: genai.bedrock.BedrockFoundationModel.TITAN_EMBED_TEXT_V2_1024,
-      vectorStore: new genai.bedrock.VectorCollection(this, 'VectorCollection', {
-        collectionName: 'iecho-vector-collection',
-        vectorField: 'bedrock-knowledge-base-default-vector',
-        textField: 'AMAZON_BEDROCK_TEXT_CHUNK',
-        metadataField: 'AMAZON_BEDROCK_METADATA',
-      }),
+    // Create IAM role for Bedrock Knowledge Base
+    const knowledgeBaseRole = new iam.Role(this, 'KnowledgeBaseRole', {
+      assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
+      inlinePolicies: {
+        BedrockKnowledgeBasePolicy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'bedrock:InvokeModel',
+                'bedrock:InvokeModelWithResponseStream',
+              ],
+              resources: [
+                `arn:aws:bedrock:${this.region}::foundation-model/amazon.titan-embed-text-v2:0`,
+              ],
+            }),
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                's3:GetObject',
+                's3:ListBucket',
+                's3:PutObject',
+                's3:DeleteObject',
+              ],
+              resources: [
+                documentBucket.bucketArn,
+                `${documentBucket.bucketArn}/*`,
+              ],
+            }),
+          ],
+        }),
+      },
     });
 
-    // Create data source with Bedrock Data Automation for advanced parsing
-    const dataSource = new genai.bedrock.S3DataSource(this, 'DocumentDataSource', {
-      knowledgeBase,
-      dataSourceName: 'iecho-document-source',
-      bucket: documentBucket,
-      dataSourceConfiguration: {
-        type: genai.bedrock.DataSourceType.S3,
-        s3Configuration: {
-          bucketArn: documentBucket.bucketArn,
-          inclusionPrefixes: ['processed/'],
-        },
-      },
-      // Use Bedrock Data Automation for intelligent document parsing
-      parsingStrategy: genai.bedrock.ParsingStrategy.BEDROCK_DATA_AUTOMATION,
-      parsingConfiguration: {
-        bedrockDataAutomationConfiguration: {
-          parsingPrompt: `
-You are an expert document parser. Parse the following document content and extract:
-
-1. **Main Topics**: Identify and extract the primary subjects and themes
-2. **Key Information**: Extract important facts, figures, and data points
-3. **Structure**: Maintain document hierarchy (headings, sections, subsections)
-4. **Context**: Preserve relationships between different parts of the document
-5. **Metadata**: Extract titles, authors, dates, and other relevant metadata
-
-For multi-modal content:
-- **Tables**: Convert to structured text format with clear column/row relationships
-- **Images**: Describe visual content and extract any text from images
-- **Charts/Graphs**: Describe data trends and key insights
-- **Presentations**: Maintain slide structure and extract speaker notes
-
-Ensure the parsed content is:
-- Semantically meaningful for vector search
-- Properly chunked for optimal retrieval
-- Maintains context and relationships
-- Includes relevant metadata for citation purposes
-
-Parse the document thoroughly while preserving its semantic structure and meaning.
-          `,
-        },
-      },
-      // Use hierarchical chunking for better context preservation
-      chunkingStrategy: genai.bedrock.ChunkingStrategy.HIERARCHICAL,
-      maxTokens: 1024,
-      overlapPercentage: 15,
-    });
+    // Note: Vector storage is handled by Bedrock when using S3 Vectors
+    // Bedrock automatically creates and manages its own S3 bucket for vector storage
 
     // ========================================
-    // 3. LAMBDA LAYERS
+    // 4. BEDROCK KNOWLEDGE BASE (Created manually via AWS Console)
+    // ========================================
+    
+    // Note: Knowledge Base with S3 Vectors will be created via AWS CLI
+    // since CloudFormation doesn't support S3_VECTORS type yet
+    
+    // We'll create placeholder values that will be replaced by CLI outputs
+    const knowledgeBaseId = 'PLACEHOLDER_KB_ID'; // Will be set by deployment script
+    const dataSourceId = 'PLACEHOLDER_DS_ID';   // Will be set by deployment script
+
+    // ========================================
+    // 5. LAMBDA LAYERS
     // ========================================
 
     // Create Lambda layer for document processing dependencies
@@ -143,7 +125,7 @@ Parse the document thoroughly while preserving its semantic structure and meanin
     });
 
     // ========================================
-    // 4. LAMBDA FUNCTIONS
+    // 6. LAMBDA FUNCTIONS
     // ========================================
 
     // Document processing Lambda (PPT to PDF conversion)
@@ -156,15 +138,14 @@ Parse the document thoroughly while preserving its semantic structure and meanin
       timeout: cdk.Duration.minutes(15),
       memorySize: 2048,
       environment: {
-        KNOWLEDGE_BASE_ID: knowledgeBase.knowledgeBaseId,
-        DATA_SOURCE_ID: dataSource.dataSourceId,
+        KNOWLEDGE_BASE_ID: knowledgeBaseId, // Will be updated by deployment script
+        DATA_SOURCE_ID: dataSourceId,       // Will be updated by deployment script
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
     });
 
     // Grant permissions to document processor
     documentBucket.grantReadWrite(documentProcessorLambda);
-    knowledgeBase.grantRead(documentProcessorLambda);
     
     documentProcessorLambda.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
@@ -174,47 +155,80 @@ Parse the document thoroughly while preserving its semantic structure and meanin
         'bedrock:ListIngestionJobs',
         'bedrock:GetKnowledgeBase',
       ],
-      resources: [knowledgeBase.knowledgeBaseArn, dataSource.dataSourceArn],
+      resources: [
+        `arn:aws:bedrock:${this.region}:${this.account}:knowledge-base/*`, // Allow access to any KB
+        `arn:aws:bedrock:${this.region}:${this.account}:knowledge-base/*/data-source/*`, // Allow access to any data source
+      ],
     }));
 
     // ========================================
-    // 5. SIMPLIFIED EKS CLUSTER (NO NAT GATEWAY)
+    // 7. SIMPLIFIED EKS CLUSTER (NO NAT GATEWAY)
     // ========================================
 
-    // Create simplified VPC with only public subnets (no NAT Gateway needed)
+    // Create VPC with private subnets and VPC endpoints for cost-effective Fargate deployment
     const vpc = new ec2.Vpc(this, 'EksVpc', {
       maxAzs: 2,
-      natGateways: 0, // Remove expensive NAT Gateway
+      natGateways: 0, // No NAT Gateway to save costs - use VPC endpoints instead
       subnetConfiguration: [
         {
           cidrMask: 24,
           name: 'Public',
           subnetType: ec2.SubnetType.PUBLIC,
         },
+        {
+          cidrMask: 24,
+          name: 'Private',
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED, // Truly private subnets for Fargate
+        },
       ],
     });
 
-    // Create EKS cluster in public subnets
+    // Add VPC endpoints for Fargate to access AWS services without NAT Gateway
+    // This is much cheaper than NAT Gateway (~$7/month vs ~$45/month)
+    vpc.addGatewayEndpoint('S3Endpoint', {
+      service: ec2.GatewayVpcEndpointAwsService.S3,
+      subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
+    });
+
+    vpc.addInterfaceEndpoint('EcrApiEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.ECR,
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+
+    vpc.addInterfaceEndpoint('EcrDkrEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER,
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+
+    vpc.addInterfaceEndpoint('CloudWatchLogsEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+
+    // Create EKS cluster with private subnet configuration
     const cluster = new eks.Cluster(this, 'EksCluster', {
       clusterName: 'iecho-agent-cluster',
       version: eks.KubernetesVersion.V1_31,
       vpc,
       defaultCapacity: 0, // We'll use Fargate
-      endpointAccess: eks.EndpointAccess.PUBLIC, // Simplified - public access only
-      vpcSubnets: [{ subnetType: ec2.SubnetType.PUBLIC }],
+      endpointAccess: eks.EndpointAccess.PUBLIC, // Control plane accessible from internet
+      // Use private subnets for the cluster (required for Fargate)
+      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
     });
 
-    // Add Fargate profile for agents
+    // Add Fargate profile for agents (use private subnets as required by AWS)
     cluster.addFargateProfile('AgentProfile', {
       selectors: [
         { namespace: 'iecho-agents' },
       ],
       fargateProfileName: 'iecho-agents-profile',
-      subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
+      // Use private subnets for Fargate (AWS requirement)
+      vpc: vpc,
+      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
     });
 
     // Create namespace for agents
-    cluster.addManifest('AgentNamespace', {
+    const agentNamespace = cluster.addManifest('AgentNamespace', {
       apiVersion: 'v1',
       kind: 'Namespace',
       metadata: {
@@ -222,26 +236,17 @@ Parse the document thoroughly while preserving its semantic structure and meanin
       },
     });
 
-    // Create IAM role for EKS service account
-    const agentServiceRole = new iam.Role(this, 'AgentServiceRole', {
-      assumedBy: new iam.WebIdentityPrincipal(
-        cluster.openIdConnectProvider.openIdConnectProviderArn,
-        {
-          StringEquals: {
-            [`${cluster.openIdConnectProvider.openIdConnectProviderIssuer}:sub`]: 'system:serviceaccount:iecho-agents:iecho-agent-service-account',
-            [`${cluster.openIdConnectProvider.openIdConnectProviderIssuer}:aud`]: 'sts.amazonaws.com',
-          },
-        }
-      ),
-      description: 'Service role for iECHO RAG agent running on EKS Fargate',
+    // Create service account with IRSA (IAM Roles for Service Accounts)
+    const agentServiceAccount = cluster.addServiceAccount('AgentServiceAccount', {
+      name: 'iecho-agent-service-account',
+      namespace: 'iecho-agents',
     });
-
-    // Grant permissions to agent service role
-    knowledgeBase.grantRead(agentServiceRole);
-    feedbackTable.grantReadWriteData(agentServiceRole);
-    documentBucket.grantRead(agentServiceRole);
     
-    agentServiceRole.addToPolicy(new iam.PolicyStatement({
+    // Grant the service account the necessary permissions
+    feedbackTable.grantReadWriteData(agentServiceAccount);
+    documentBucket.grantRead(agentServiceAccount);
+    
+    agentServiceAccount.addToPrincipalPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
         'bedrock:InvokeModel',
@@ -255,15 +260,8 @@ Parse the document thoroughly while preserving its semantic structure and meanin
       resources: ['*'],
     }));
 
-    // Create service account
-    const agentServiceAccount = cluster.addServiceAccount('AgentServiceAccount', {
-      name: 'iecho-agent-service-account',
-      namespace: 'iecho-agents',
-      role: agentServiceRole,
-    });
-
-    // Create ConfigMap for agent configuration
-    cluster.addManifest('AgentConfigMap', {
+    // Create ConfigMap for agent configuration (depends on namespace)
+    const agentConfigMap = cluster.addManifest('AgentConfigMap', {
       apiVersion: 'v1',
       kind: 'ConfigMap',
       metadata: {
@@ -271,16 +269,17 @@ Parse the document thoroughly while preserving its semantic structure and meanin
         namespace: 'iecho-agents',
       },
       data: {
-        'knowledge-base-id': knowledgeBase.knowledgeBaseId,
+        'knowledge-base-id': knowledgeBaseId, // Will be updated by deployment script
         'feedback-table': feedbackTable.tableName,
         'document-bucket': documentBucket.bucketName,
-        'data-source-id': dataSource.dataSourceId,
+        'data-source-id': dataSourceId,       // Will be updated by deployment script
         'aws-region': this.region,
       },
     });
+    agentConfigMap.node.addDependency(agentNamespace);
 
-    // Create ConfigMap with Strands SDK agent application code
-    cluster.addManifest('AgentCodeConfigMap', {
+    // Create ConfigMap with Strands SDK agent application code (depends on namespace)
+    const agentCodeConfigMap = cluster.addManifest('AgentCodeConfigMap', {
       apiVersion: 'v1',
       kind: 'ConfigMap',
       metadata: {
@@ -556,9 +555,10 @@ requests==2.31.0
         `
       },
     });
+    agentCodeConfigMap.node.addDependency(agentNamespace);
 
-    // Deploy the Strands SDK agent as Fargate task (always running)
-    cluster.addManifest('AgentDeployment', {
+    // Deploy the Strands SDK agent as Fargate task (always running) (depends on namespace and configmaps)
+    const agentDeployment = cluster.addManifest('AgentDeployment', {
       apiVersion: 'apps/v1',
       kind: 'Deployment',
       metadata: {
@@ -688,9 +688,12 @@ requests==2.31.0
         },
       },
     });
+    agentDeployment.node.addDependency(agentNamespace);
+    agentDeployment.node.addDependency(agentConfigMap);
+    agentDeployment.node.addDependency(agentCodeConfigMap);
 
-    // Create ClusterIP service for ALB integration
-    cluster.addManifest('AgentService', {
+    // Create ClusterIP service for ALB integration (depends on namespace)
+    const agentService = cluster.addManifest('AgentService', {
       apiVersion: 'v1',
       kind: 'Service',
       metadata: {
@@ -711,6 +714,7 @@ requests==2.31.0
         type: 'ClusterIP',
       },
     });
+    agentService.node.addDependency(agentNamespace);
 
     // Application Load Balancer (as per architecture description)
     const alb = new elbv2.ApplicationLoadBalancer(this, 'AgentALB', {
@@ -749,93 +753,110 @@ requests==2.31.0
     // which needs to be installed in the EKS cluster
 
     // ========================================
-    // 6. API GATEWAY WITH ALB INTEGRATION
+    // 8. API GATEWAY WITH ALB INTEGRATION
     // ========================================
 
-    // Create API Gateway that routes to ALB (as per architecture description)
-    const api = new apigateway.RestApi(this, 'IEchoRestApi', {
-      restApiName: 'iecho-rest-api',
-      description: 'REST API for iECHO RAG Chatbot - Routes to ALB → EKS Fargate Agent',
-      defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
-        allowMethods: apigateway.Cors.ALL_METHODS,
+    // Create VPC Link v2 for ALB integration (HTTP API supports ALB natively)
+    const vpcLink = new apigatewayv2.VpcLink(this, 'AgentVpcLink', {
+      vpc,
+      subnets: { subnetType: ec2.SubnetType.PUBLIC }, // Use public subnets since we have no NAT Gateway
+      vpcLinkName: 'iecho-agent-vpc-link',
+    });
+
+    // Create HTTP API Gateway v2 for ALB integration
+    const httpApi = new apigatewayv2.HttpApi(this, 'AgentHttpApi', {
+      apiName: 'iecho-agent-http-api',
+      description: 'HTTP API for iECHO RAG Agent with ALB integration',
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [apigatewayv2.CorsHttpMethod.ANY],
         allowHeaders: ['Content-Type', 'X-Amz-Date', 'Authorization', 'X-Api-Key'],
       },
     });
 
-    // Create VPC Link for ALB integration
-    const vpcLink = new apigateway.VpcLink(this, 'AgentVpcLink', {
-      description: 'VPC Link to EKS Fargate Agent ALB',
-      targets: [alb],
+    // Create ALB integration for HTTP API
+    const albIntegration = new apigatewayv2_integrations.HttpAlbIntegration(
+      'AlbIntegration',
+      listener,
+      {
+        vpcLink,
+      }
+    );
+
+    // Add routes to HTTP API - using proxy route for all endpoints
+    new apigatewayv2.HttpRoute(this, 'ProxyRoute', {
+      httpApi,
+      routeKey: apigatewayv2.HttpRouteKey.with('/{proxy+}', apigatewayv2.HttpMethod.ANY),
+      integration: albIntegration,
     });
 
-    // Create HTTP integration to ALB
-    const albIntegration = new apigateway.Integration({
-      type: apigateway.IntegrationType.HTTP_PROXY,
-      integrationHttpMethod: 'ANY',
-      uri: `http://${alb.loadBalancerDnsName}/{proxy}`,
-      options: {
-        connectionType: apigateway.ConnectionType.VPC_LINK,
-        vpcLink: vpcLink,
-        requestParameters: {
-          'integration.request.path.proxy': 'method.request.path.proxy',
-        },
-      },
+    // Add specific routes for better documentation and routing
+    new apigatewayv2.HttpRoute(this, 'ChatRoute', {
+      httpApi,
+      routeKey: apigatewayv2.HttpRouteKey.with('/chat', apigatewayv2.HttpMethod.POST),
+      integration: albIntegration,
     });
 
-    // Add proxy resource to handle all paths
-    const proxyResource = api.root.addProxy({
-      defaultIntegration: albIntegration,
-      anyMethod: true,
+    new apigatewayv2.HttpRoute(this, 'FeedbackRoute', {
+      httpApi,
+      routeKey: apigatewayv2.HttpRouteKey.with('/feedback', apigatewayv2.HttpMethod.POST),
+      integration: albIntegration,
     });
 
-    // Add specific endpoints for better documentation
-    const chatResource = api.root.addResource('chat');
-    chatResource.addMethod('POST', albIntegration);
+    new apigatewayv2.HttpRoute(this, 'HealthRoute', {
+      httpApi,
+      routeKey: apigatewayv2.HttpRouteKey.with('/health', apigatewayv2.HttpMethod.GET),
+      integration: albIntegration,
+    });
 
-    const feedbackResource = api.root.addResource('feedback');
-    feedbackResource.addMethod('POST', albIntegration);
-
-    const healthResource = api.root.addResource('health');
-    healthResource.addMethod('GET', albIntegration);
-
-    const documentsResource = api.root.addResource('documents');
-    documentsResource.addMethod('GET', albIntegration);
-
-    // ========================================
-    // 6. S3 TRIGGER FOR DOCUMENT PROCESSING
-    // ========================================
-
-    // Create S3 to Lambda construct for document processing
-    const s3ToLambdaConstruct = new S3ToLambda(this, 'DocumentProcessing', {
-      existingLambdaObj: documentProcessorLambda,
-      existingBucketObj: documentBucket,
-      s3EventTypes: [s3.EventType.OBJECT_CREATED],
-      s3EventFilters: [{
-        prefix: 'uploads/',
-        suffix: '.pdf'
-      }, {
-        prefix: 'uploads/',
-        suffix: '.ppt'
-      }, {
-        prefix: 'uploads/',
-        suffix: '.pptx'
-      }, {
-        prefix: 'uploads/',
-        suffix: '.doc'
-      }, {
-        prefix: 'uploads/',
-        suffix: '.docx'
-      }],
+    new apigatewayv2.HttpRoute(this, 'DocumentsRoute', {
+      httpApi,
+      routeKey: apigatewayv2.HttpRouteKey.with('/documents', apigatewayv2.HttpMethod.GET),
+      integration: albIntegration,
     });
 
     // ========================================
-    // 7. OUTPUTS
+    // 9. S3 TRIGGER FOR DOCUMENT PROCESSING
     // ========================================
 
-    new cdk.CfnOutput(this, 'ApiGatewayUrl', {
-      value: api.url,
-      description: 'REST API Gateway URL (Routes via VPC Link → ALB → EKS Fargate Agent)',
+    // Create S3 event notifications for document processing
+    documentBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(documentProcessorLambda),
+      { prefix: 'uploads/', suffix: '.pdf' }
+    );
+    
+    documentBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(documentProcessorLambda),
+      { prefix: 'uploads/', suffix: '.ppt' }
+    );
+    
+    documentBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(documentProcessorLambda),
+      { prefix: 'uploads/', suffix: '.pptx' }
+    );
+    
+    documentBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(documentProcessorLambda),
+      { prefix: 'uploads/', suffix: '.doc' }
+    );
+    
+    documentBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(documentProcessorLambda),
+      { prefix: 'uploads/', suffix: '.docx' }
+    );
+
+    // ========================================
+    // 10. OUTPUTS
+    // ========================================
+
+    new cdk.CfnOutput(this, 'HttpApiGatewayUrl', {
+      value: httpApi.url!,
+      description: 'HTTP API Gateway URL (Routes via VPC Link → ALB → EKS Fargate Agent)',
     });
 
     new cdk.CfnOutput(this, 'ApplicationLoadBalancerDns', {
@@ -858,19 +879,19 @@ requests==2.31.0
       description: 'S3 bucket for document uploads',
     });
 
-    new cdk.CfnOutput(this, 'KnowledgeBaseId', {
-      value: knowledgeBase.knowledgeBaseId,
-      description: 'Bedrock Knowledge Base ID',
+    new cdk.CfnOutput(this, 'KnowledgeBaseRoleArn', {
+      value: knowledgeBaseRole.roleArn,
+      description: 'IAM Role ARN for Bedrock Knowledge Base (for manual creation)',
+    });
+
+    new cdk.CfnOutput(this, 'DocumentBucketArn', {
+      value: documentBucket.bucketArn,
+      description: 'S3 Document Bucket ARN (for Data Source creation)',
     });
 
     new cdk.CfnOutput(this, 'FeedbackTableName', {
       value: feedbackTable.tableName,
       description: 'DynamoDB table for user feedback',
-    });
-
-    new cdk.CfnOutput(this, 'EksClusterName', {
-      value: cluster.clusterName,
-      description: 'EKS cluster name for agents',
     });
 
     new cdk.CfnOutput(this, 'DocumentProcessingLayerArn', {
@@ -879,7 +900,7 @@ requests==2.31.0
     });
 
     // ========================================
-    // 9. CDK NAG SUPPRESSIONS
+    // 11. CDK NAG SUPPRESSIONS
     // ========================================
 
     // Suppress CDK Nag warnings for development environment

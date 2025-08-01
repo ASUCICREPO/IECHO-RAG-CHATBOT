@@ -25,8 +25,7 @@
   "dependencies": {
     "aws-cdk-lib": "2.167.1",
     "constructs": "^10.0.0",
-    "@aws-solutions-constructs/aws-s3-lambda": "^2.70.0",
-    "@cdklabs/generative-ai-cdk-constructs": "^0.1.271",
+    "@cdklabs/generative-ai-cdk-constructs": "0.1.250",
     "cdk-nag": "^2.28.195"
   }
 }
