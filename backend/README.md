@@ -55,14 +55,15 @@ backend/
 ### Deploy Infrastructure
 
 ```bash
-# Use the automated deployment script (recommended)
-./deploy.sh
-
-# Or deploy manually
+# Standard CDK deployment
 cd cdk-infrastructure
 npm install
 cdk bootstrap  # First time only
 cdk deploy --require-approval never
+
+# Then create Knowledge Base manually and update configs
+cd ..
+./update-configs.sh
 ```
 
 The deployment script automatically:

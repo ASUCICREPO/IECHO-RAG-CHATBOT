@@ -64,16 +64,13 @@ This system implements a modern RAG (Retrieval-Augmented Generation) backend arc
 
 ```bash
 # Navigate to backend directory
-cd backend
+cd backend/cdk-infrastructure
 
-# Deploy CDK infrastructure only (no Knowledge Base creation)
-cd cdk-infrastructure
+# Install dependencies and deploy
 npm install
 cdk bootstrap  # First time only
 cdk deploy --require-approval never
 ```
-
-**Note**: The `deploy.sh` script is designed for CLI-based Knowledge Base creation, but since S3 Vectors requires manual setup through the AWS Console, we use the manual approach below.
 
 ### 2. Create Knowledge Base Manually
 

@@ -93,6 +93,34 @@ export class IEchoRagChatbotStack extends cdk.Stack {
                 `${documentBucket.bucketArn}/*`,
               ],
             }),
+            // S3 Vectors permissions for Knowledge Base storage
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                's3vectors:*', // Grant all S3 Vectors permissions to avoid missing any
+              ],
+              resources: [
+                `arn:aws:s3vectors:${this.region}:${this.account}:bucket/bedrock-knowledge-base-*`,
+                `arn:aws:s3vectors:${this.region}:${this.account}:bucket/bedrock-knowledge-base-*/index/*`,
+              ],
+            }),
+            // Additional S3 permissions for Bedrock-managed buckets
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                's3:GetObject',
+                's3:PutObject',
+                's3:DeleteObject',
+                's3:ListBucket',
+                's3:GetBucketLocation',
+                's3:GetBucketVersioning',
+                's3:ListBucketVersions',
+              ],
+              resources: [
+                `arn:aws:s3:::bedrock-knowledge-base-*`,
+                `arn:aws:s3:::bedrock-knowledge-base-*/*`,
+              ],
+            }),
           ],
         }),
       },
