@@ -1,0 +1,9 @@
+{
+  "name": "iecho-document-processor",
+  "version": "1.0.0",
+  "description": "Lambda function to convert PPT to PDF using LibreOffice",
+  "main": "index.js",
+  "dependencies": {
+    "tar": "^6.1.0"
+  }
+}

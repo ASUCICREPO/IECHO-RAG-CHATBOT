@@ -1,0 +1,19 @@
+{
+  "LambdaConfigurations": [
+    {
+      "Id": "iecho-document-processor-trigger",
+      "LambdaFunctionArn": "arn:aws:lambda:us-west-2:138681986761:function:iecho-document-processor",
+      "Events": ["s3:ObjectCreated:*"],
+      "Filter": {
+        "Key": {
+          "FilterRules": [
+            {
+              "Name": "prefix",
+              "Value": "uploads/"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
