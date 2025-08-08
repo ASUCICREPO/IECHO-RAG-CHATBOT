@@ -1,199 +1,114 @@
-from typing import List, Dict, Optional
+from collections.abc import Callable
+from queue import Queue
+from threading import Thread
+from typing import Iterator, Dict, Optional
 from uuid import uuid4
-import os
-import json
-import boto3
-from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi.responses import StreamingResponse, PlainTextResponse
 from pydantic import BaseModel
 import uvicorn
+from strands import Agent, tool
+from strands_tools import http_request
+import os
 
-app = FastAPI(title="iECHO RAG Chatbot API")
+app = FastAPI(title="Weather API")
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Define a weather-focused system prompt
+WEATHER_SYSTEM_PROMPT = """You are a weather assistant with HTTP capabilities. You can:
 
-# Initialize AWS clients
-bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
-dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
-s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
+1. Make HTTP requests to the National Weather Service API
+2. Process and display weather forecast data
+3. Provide weather information for locations in the United States
 
-# Environment variables
-KNOWLEDGE_BASE_ID = os.environ.get('KNOWLEDGE_BASE_ID', '')
-FEEDBACK_TABLE_NAME = os.environ.get('FEEDBACK_TABLE_NAME', 'iecho-feedback-table')
-DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET', '')
-AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
+When retrieving weather information:
+1. First get the coordinates or grid information using https://api.weather.gov/points/{latitude},{longitude} or https://api.weather.gov/points/{zipcode}
+2. Then use the returned forecast URL to get the actual forecast
 
-# Pydantic models
-class ChatRequest(BaseModel):
-    query: str
-    userId: str
-    sessionId: Optional[str] = None
+When displaying responses:
+- Format weather data in a human-readable way
+- Highlight important information like temperature, precipitation, and alerts
+- Handle errors appropriately
+- Don't ask follow-up questions
 
-class FeedbackRequest(BaseModel):
-    userId: str
-    responseId: str
-    rating: int
-    feedback: Optional[str] = None
+Always explain the weather conditions clearly and provide context for the forecast.
 
-class Citation(BaseModel):
-    title: str
-    source: str
-    excerpt: str
+At the point where tools are done being invoked and a summary can be presented to the user, invoke the ready_to_summarize
+tool and then continue with the summary.
+"""
 
-class ChatResponse(BaseModel):
-    response: str
-    sessionId: str
-    citations: List[Citation]
-    userId: str
+class PromptRequest(BaseModel):
+    prompt: str
 
 @app.get('/health')
 def health_check():
     """Health check endpoint for the load balancer."""
-    return {
-        "status": "healthy",
-        "service": "iECHO RAG Chatbot API",
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    return {"status": "healthy"}
 
-@app.post('/chat', response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """Send a chat message and receive AI-generated response."""
+@app.post('/weather')
+async def get_weather(request: PromptRequest):
+    """Endpoint to get weather information."""
+    prompt = request.prompt
+    
+    if not prompt:
+        raise HTTPException(status_code=400, detail="No prompt provided")
+
     try:
-        if not request.query.strip():
-            raise HTTPException(status_code=400, detail="Query cannot be empty")
-        
-        if not KNOWLEDGE_BASE_ID:
-            raise HTTPException(status_code=500, detail="Knowledge Base not configured")
-        
-        # Generate session ID if not provided
-        session_id = request.sessionId or str(uuid4())
-        
-        # Query the Bedrock Knowledge Base with Nova Lite inference profile
-        response = bedrock_agent_runtime.retrieve_and_generate(
-            input={
-                'text': request.query
-            },
-            retrieveAndGenerateConfiguration={
-                'type': 'KNOWLEDGE_BASE',
-                'knowledgeBaseConfiguration': {
-                    'knowledgeBaseId': KNOWLEDGE_BASE_ID,
-                    'modelArn': f'arn:aws:bedrock:{os.environ.get("AWS_REGION", "us-west-2")}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0'
-                }
-            }
+        weather_agent = Agent(
+            system_prompt=WEATHER_SYSTEM_PROMPT,
+            tools=[http_request],
+            model="us.amazon.nova-lite-v1:0",  # Specify Nova Lite via cross-region
         )
-        
-        # Extract response text
-        response_text = response['output']['text']
-        
-        # Extract citations
-        citations = []
-        if 'citations' in response:
-            for citation in response['citations']:
-                for reference in citation.get('retrievedReferences', []):
-                    citations.append(Citation(
-                        title=reference.get('content', {}).get('text', '')[:100] + "...",
-                        source=reference.get('location', {}).get('s3Location', {}).get('uri', ''),
-                        excerpt=reference.get('content', {}).get('text', '')[:200] + "..."
-                    ))
-        
-        return ChatResponse(
-            response=response_text,
-            sessionId=session_id,
-            citations=citations,
-            userId=request.userId
-        )
-        
+        response = weather_agent(prompt)
+        content = str(response)
+        return PlainTextResponse(content=content)
     except Exception as e:
-        print(f"Error in chat endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post('/feedback')
-async def submit_feedback(request: FeedbackRequest):
-    """Submit user feedback for responses."""
+async def run_weather_agent_and_stream_response(prompt: str):
+    """
+    A helper function to yield summary text chunks one by one as they come in, allowing the web server to emit
+    them to caller live
+    """
+    is_summarizing = False
+
+    @tool
+    def ready_to_summarize():
+        """
+        A tool that is intended to be called by the agent right before summarize the response.
+        """
+        nonlocal is_summarizing
+        is_summarizing = True
+        return "Ok - continue providing the summary!"
+
+    weather_agent = Agent(
+        system_prompt=WEATHER_SYSTEM_PROMPT,
+        tools=[http_request, ready_to_summarize],
+        model="us.amazon.nova-lite-v1:0",  # Specify Nova Lite via cross-region
+        callback_handler=None
+    )
+
+    async for item in weather_agent.stream_async(prompt):
+        if not is_summarizing:
+            continue
+        if "data" in item:
+            yield item['data']
+
+@app.post('/weather-streaming')
+async def get_weather_streaming(request: PromptRequest):
+    """Endpoint to stream the weather summary as it comes it, not all at once at the end."""
     try:
-        if not (1 <= request.rating <= 5):
-            raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
-        
-        # Store feedback in DynamoDB
-        table = dynamodb.Table(FEEDBACK_TABLE_NAME)
-        
-        feedback_item = {
-            'feedbackId': str(uuid4()),
-            'userId': request.userId,
-            'responseId': request.responseId,
-            'rating': request.rating,
-            'feedback': request.feedback or '',
-            'timestamp': datetime.utcnow().isoformat(),
-            'ttl': int(datetime.utcnow().timestamp()) + (365 * 24 * 60 * 60)  # 1 year TTL
-        }
-        
-        table.put_item(Item=feedback_item)
-        
-        return {
-            "message": "Feedback submitted successfully",
-            "feedbackId": feedback_item['feedbackId']
-        }
-        
-    except Exception as e:
-        print(f"Error in feedback endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        prompt = request.prompt
 
-@app.get('/documents')
-async def list_documents():
-    """List processed documents in the knowledge base."""
-    try:
-        if not DOCUMENTS_BUCKET:
-            raise HTTPException(status_code=500, detail="Documents bucket not configured")
-        
-        # List objects in the processed folder
-        response = s3.list_objects_v2(
-            Bucket=DOCUMENTS_BUCKET,
-            Prefix='processed/',
-            MaxKeys=100
+        if not prompt:
+            raise HTTPException(status_code=400, detail="No prompt provided")
+
+        return StreamingResponse(
+            run_weather_agent_and_stream_response(prompt),
+            media_type="text/plain"
         )
-        
-        documents = []
-        if 'Contents' in response:
-            for obj in response['Contents']:
-                if obj['Key'] != 'processed/':  # Skip the folder itself
-                    documents.append({
-                        'key': obj['Key'],
-                        'name': obj['Key'].replace('processed/', ''),
-                        'size': obj['Size'],
-                        'lastModified': obj['LastModified'].isoformat()
-                    })
-        
-        return {
-            "documents": documents,
-            "count": len(documents)
-        }
-        
     except Exception as e:
-        print(f"Error in documents endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-@app.get('/status')
-async def get_status():
-    """Get system status and configuration."""
-    return {
-        "service": "iECHO RAG Chatbot API",
-        "status": "running",
-        "knowledgeBaseConfigured": bool(KNOWLEDGE_BASE_ID),
-        "documentsConfigured": bool(DOCUMENTS_BUCKET),
-        "feedbackConfigured": bool(FEEDBACK_TABLE_NAME),
-        "region": os.environ.get('AWS_REGION', 'us-west-2'),
-        "timestamp": datetime.utcnow().isoformat()
-    }
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == '__main__':
     # Get port from environment variable or default to 8000
