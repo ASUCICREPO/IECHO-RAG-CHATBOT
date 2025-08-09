@@ -25,6 +25,8 @@ export class AgentEksFargateStack extends Stack {
     const masterRole = new iam.Role(this, "ClusterMasterRole", {
       assumedBy: new iam.AccountRootPrincipal(),
     });
+    
+    masterRole.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
     // Create EKS Fargate cluster
     const cluster = new eks.FargateCluster(this, "AgentCluster", {
@@ -269,6 +271,8 @@ export class AgentEksFargateStack extends Stack {
           "alb.ingress.kubernetes.io/scheme": "internet-facing",
           "alb.ingress.kubernetes.io/target-type": "ip",
           "alb.ingress.kubernetes.io/healthcheck-path": "/health",
+          "alb.ingress.kubernetes.io/load-balancer-attributes": "deletion_protection.enabled=false",
+          "alb.ingress.kubernetes.io/tags": "Environment=dev,ManagedBy=CDK",
         },
       },
       spec: {
@@ -303,10 +307,56 @@ export class AgentEksFargateStack extends Stack {
     ingressManifest.node.addDependency(svcManifest);
     ingressManifest.node.addDependency(albChart);
 
-    // Output ALB DNS name (will be available after ingress creation)
-    new ssm.StringParameter(this, "AlbDnsName", {
-      parameterName: `/iecho/alb-dns-name`,
-      stringValue: "will-be-updated-after-deployment",
+    // Get ALB DNS name from ingress (available after deployment)
+    const albDnsProvider = new eks.KubernetesObjectValue(this, "AlbDnsProvider", {
+      cluster,
+      objectType: "ingress",
+      objectName: "agent-ingress",
+      objectNamespace: k8sAppNameSpace,
+      jsonPath: ".status.loadBalancer.ingress[0].hostname",
+    });
+    
+    albDnsProvider.node.addDependency(ingressManifest);
+
+    // Create API Gateway
+    const api = new apigateway.RestApi(this, "AgentApi", {
+      restApiName: "iECHO Agent API",
+      description: "API Gateway for iECHO RAG Chatbot",
+      defaultCorsPreflightOptions: {
+        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowMethods: apigateway.Cors.ALL_METHODS,
+        allowHeaders: ['Content-Type', 'X-Amz-Date', 'Authorization', 'X-Api-Key'],
+      },
+    });
+
+    // Create HTTP integration to ALB (using token for dynamic URL)
+    const albIntegration = new apigateway.HttpIntegration(`http://${albDnsProvider.value}/{proxy}`, {
+      httpMethod: 'ANY',
+      options: {
+        requestParameters: {
+          'integration.request.path.proxy': 'method.request.path.proxy',
+        },
+      },
+    });
+
+    // Add proxy resource
+    const proxyResource = api.root.addResource('{proxy+}');
+    proxyResource.addMethod('ANY', albIntegration, {
+      requestParameters: {
+        'method.request.path.proxy': true,
+      },
+    });
+
+    // Add root method (without proxy parameter)
+    const rootIntegration = new apigateway.HttpIntegration(`http://${albDnsProvider.value}`, {
+      httpMethod: 'ANY',
+    });
+    api.root.addMethod('ANY', rootIntegration);
+
+    // Output API Gateway URL
+    this.exportValue(api.url, {
+      name: "ApiGatewayUrl",
+      description: "The API Gateway URL",
     });
 
     // Output the cluster name and endpoint
