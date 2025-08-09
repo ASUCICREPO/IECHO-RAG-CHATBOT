@@ -3,3 +3,5 @@ uvicorn==0.34.2
 pydantic==2.11.4
 strands-agents
 strands-agents-tools
+watchtower
+boto3

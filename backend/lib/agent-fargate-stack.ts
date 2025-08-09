@@ -3,6 +3,10 @@ import { Construct } from "constructs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as eks from "aws-cdk-lib/aws-eks";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as logs from "aws-cdk-lib/aws-logs";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
+import * as apigateway from "aws-cdk-lib/aws-apigateway";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as path from "path";
 import { KubectlV32Layer } from "@aws-cdk/lambda-layer-kubectl-v32";
@@ -56,11 +60,59 @@ export class AgentEksFargateStack extends Stack {
       assumedBy: iamPrinciple,
     });
 
-    // Add Bedrock permissions
+    // Create CloudWatch log group
+    const logGroup = new logs.LogGroup(this, "AgentLogGroup", {
+      logGroupName: `/aws/eks/${cluster.clusterName}/agent-service`,
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY
+    });
+
+    // Create DynamoDB table for feedback
+    const feedbackTable = new dynamodb.Table(this, "FeedbackTable", {
+      tableName: `iecho-feedback-table-${this.stackName}`,
+      partitionKey: { name: "feedbackId", type: dynamodb.AttributeType.STRING },
+      timeToLiveAttribute: "ttl",
+      removalPolicy: RemovalPolicy.DESTROY,
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST
+    });
+
+    // Add Bedrock and CloudWatch permissions
     iamRoleForK8sSa.addToPrincipalPolicy(
       new iam.PolicyStatement({
-        actions: ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+        actions: [
+          "bedrock:InvokeModel", 
+          "bedrock:InvokeModelWithResponseStream",
+          "bedrock:RetrieveAndGenerate",
+          "bedrock:Retrieve",
+          "bedrock:GetInferenceProfile",
+          "bedrock-agent-runtime:Retrieve",
+          "bedrock-agent-runtime:RetrieveAndGenerate"
+        ],
         resources: ["*"],
+      })
+    );
+
+    iamRoleForK8sSa.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams"
+        ],
+        resources: [logGroup.logGroupArn + ":*"],
+      })
+    );
+
+    iamRoleForK8sSa.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ],
+        resources: [feedbackTable.tableArn],
       })
     );
 
@@ -70,91 +122,16 @@ export class AgentEksFargateStack extends Stack {
       subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
     });
 
+    // Get knowledge base ID from context
+    const knowledgeBaseId = this.node.tryGetContext('knowledgeBaseId') || 'PLACEHOLDER';
+
     // Build Docker image
     const dockerAsset = new ecrAssets.DockerImageAsset(this, "AgentImage", {
       directory: path.join(__dirname, "../docker"),
       platform: ecrAssets.Platform.LINUX_AMD64,
     });
 
-    // Create service account
-    const serviceAccountManifest = {
-      apiVersion: "v1",
-      kind: "ServiceAccount",
-      metadata: {
-        name: k8sAppServiceAccount,
-        namespace: k8sAppNameSpace,
-        annotations: {
-          "eks.amazonaws.com/role-arn": iamRoleForK8sSa.roleArn,
-        },
-      },
-    };
-
-    // Create deployment
-    const deployment = {
-      apiVersion: "apps/v1",
-      kind: "Deployment",
-      metadata: {
-        name: "agent-service",
-        namespace: k8sAppNameSpace,
-        labels: { app: "agent-service" },
-      },
-      spec: {
-        replicas: 2,
-        selector: { matchLabels: { app: "agent-service" } },
-        template: {
-          metadata: { labels: { app: "agent-service" } },
-          spec: {
-            serviceAccountName: k8sAppServiceAccount,
-            containers: [{
-              name: "agent-container",
-              image: dockerAsset.imageUri,
-              ports: [{ containerPort: 8000 }],
-              resources: {
-                requests: { memory: "256Mi", cpu: "250m" },
-                limits: { memory: "512Mi", cpu: "500m" },
-              },
-              livenessProbe: {
-                httpGet: { path: "/health", port: 8000 },
-                initialDelaySeconds: 30,
-                periodSeconds: 10,
-              },
-              readinessProbe: {
-                httpGet: { path: "/health", port: 8000 },
-                initialDelaySeconds: 5,
-                periodSeconds: 5,
-              },
-            }],
-          },
-        },
-      },
-    };
-
-    // Create service
-    const service = {
-      apiVersion: "v1",
-      kind: "Service",
-      metadata: {
-        name: "agent-service",
-        namespace: k8sAppNameSpace,
-        labels: { app: "agent-service" },
-      },
-      spec: {
-        type: "ClusterIP",
-        ports: [{ port: 80, targetPort: 8000 }],
-        selector: { app: "agent-service" },
-      },
-    };
-
-    // Apply manifests
-    const saManifest = cluster.addManifest("AgentServiceAccount", serviceAccountManifest);
-    const deployManifest = cluster.addManifest("AgentDeployment", deployment);
-    const svcManifest = cluster.addManifest("AgentService", service);
-    
-    saManifest.node.addDependency(fargateProfile);
-    deployManifest.node.addDependency(saManifest);
-    svcManifest.node.addDependency(deployManifest);
-
-    // Install AWS Load Balancer Controller
+    // Install AWS Load Balancer Controller first
     const albServiceAccount = cluster.addServiceAccount("AWSLoadBalancerController", {
       name: "aws-load-balancer-controller",
       namespace: "kube-system",
@@ -205,6 +182,82 @@ export class AgentEksFargateStack extends Stack {
 
     albChart.node.addDependency(albServiceAccount);
 
+    // Create service account
+    const serviceAccountManifest = {
+      apiVersion: "v1",
+      kind: "ServiceAccount",
+      metadata: {
+        name: k8sAppServiceAccount,
+        namespace: k8sAppNameSpace,
+        annotations: {
+          "eks.amazonaws.com/role-arn": iamRoleForK8sSa.roleArn,
+        },
+      },
+    };
+
+    // Create deployment
+    const deployment = {
+      apiVersion: "apps/v1",
+      kind: "Deployment",
+      metadata: {
+        name: "agent-service",
+        namespace: k8sAppNameSpace,
+        labels: { app: "agent-service" },
+      },
+      spec: {
+        replicas: 2,
+        selector: { matchLabels: { app: "agent-service" } },
+        template: {
+          metadata: { labels: { app: "agent-service" } },
+          spec: {
+            serviceAccountName: k8sAppServiceAccount,
+            containers: [{
+              name: "agent-container",
+              image: dockerAsset.imageUri,
+              ports: [{ containerPort: 8000 }],
+              env: [
+                { name: "KNOWLEDGE_BASE_ID", value: knowledgeBaseId },
+                { name: "AWS_REGION", value: this.region },
+                { name: "AWS_ACCOUNT_ID", value: this.account },
+                { name: "LOG_GROUP", value: logGroup.logGroupName },
+                { name: "FEEDBACK_TABLE_NAME", value: feedbackTable.tableName }
+              ],
+              resources: {
+                requests: { memory: "256Mi", cpu: "250m" },
+                limits: { memory: "512Mi", cpu: "500m" },
+              },
+              livenessProbe: {
+                httpGet: { path: "/health", port: 8000 },
+                initialDelaySeconds: 30,
+                periodSeconds: 10,
+              },
+              readinessProbe: {
+                httpGet: { path: "/health", port: 8000 },
+                initialDelaySeconds: 5,
+                periodSeconds: 5,
+              },
+            }],
+          },
+        },
+      },
+    };
+
+    // Create service
+    const service = {
+      apiVersion: "v1",
+      kind: "Service",
+      metadata: {
+        name: "agent-service",
+        namespace: k8sAppNameSpace,
+        labels: { app: "agent-service" },
+      },
+      spec: {
+        type: "ClusterIP",
+        ports: [{ port: 80, targetPort: 8000 }],
+        selector: { app: "agent-service" },
+      },
+    };
+
     // Create ingress
     const ingress = {
       apiVersion: "networking.k8s.io/v1",
@@ -237,9 +290,24 @@ export class AgentEksFargateStack extends Stack {
       },
     };
 
+    // Apply manifests with proper dependencies
+    const saManifest = cluster.addManifest("AgentServiceAccount", serviceAccountManifest);
+    const deployManifest = cluster.addManifest("AgentDeployment", deployment);
+    const svcManifest = cluster.addManifest("AgentService", service);
     const ingressManifest = cluster.addManifest("AgentIngress", ingress);
-    ingressManifest.node.addDependency(albChart);
+    
+    saManifest.node.addDependency(fargateProfile);
+    deployManifest.node.addDependency(saManifest);
+    svcManifest.node.addDependency(deployManifest);
+    svcManifest.node.addDependency(albChart);
     ingressManifest.node.addDependency(svcManifest);
+    ingressManifest.node.addDependency(albChart);
+
+    // Output ALB DNS name (will be available after ingress creation)
+    new ssm.StringParameter(this, "AlbDnsName", {
+      parameterName: `/iecho/alb-dns-name`,
+      stringValue: "will-be-updated-after-deployment",
+    });
 
     // Output the cluster name and endpoint
     this.exportValue(cluster.clusterName, {
