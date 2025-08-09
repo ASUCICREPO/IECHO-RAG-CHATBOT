@@ -25,26 +25,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging with CloudWatch
-import watchtower
-
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Add CloudWatch handler if LOG_GROUP is set
-if os.environ.get('LOG_GROUP'):
+# CloudWatch logging function
+def log_to_cloudwatch(message: str, level: str = "INFO"):
+    """Send log message directly to CloudWatch"""
+    if not os.environ.get('LOG_GROUP'):
+        return
+    
     try:
-        cloudwatch_handler = watchtower.CloudWatchLogsHandler(
-            log_group=os.environ.get('LOG_GROUP'),
-            stream_name='agent-service',
-            use_queues=False
+        cloudwatch_logs = boto3.client('logs', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
+        
+        # Create log stream if it doesn't exist
+        stream_name = f"agent-service-{datetime.utcnow().strftime('%Y-%m-%d')}"
+        try:
+            cloudwatch_logs.create_log_stream(
+                logGroupName=os.environ.get('LOG_GROUP'),
+                logStreamName=stream_name
+            )
+        except cloudwatch_logs.exceptions.ResourceAlreadyExistsException:
+            pass
+        
+        # Send log event
+        cloudwatch_logs.put_log_events(
+            logGroupName=os.environ.get('LOG_GROUP'),
+            logStreamName=stream_name,
+            logEvents=[
+                {
+                    'timestamp': int(datetime.utcnow().timestamp() * 1000),
+                    'message': f"[{level}] {message}"
+                }
+            ]
         )
-        logger.addHandler(cloudwatch_handler)
     except Exception as e:
-        print(f"Failed to setup CloudWatch logging: {e}")
+        print(f"CloudWatch logging failed: {e}")
+
+print(f"Application starting with LOG_GROUP: {os.environ.get('LOG_GROUP')}")
 
 # Initialize AWS clients
 bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
@@ -57,8 +78,9 @@ FEEDBACK_TABLE_NAME = os.environ.get('FEEDBACK_TABLE_NAME', 'iecho-feedback-tabl
 DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET', '')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
 
-# Session storage for conversation context
-conversation_sessions = defaultdict(list)
+# Session storage for conversation context (with TTL)
+from time import time
+conversation_sessions = defaultdict(lambda: {'history': [], 'last_access': time()})
 
 # Pydantic models
 class ChatRequest(BaseModel):
@@ -84,60 +106,57 @@ class ChatResponse(BaseModel):
     userId: str
 
 # System prompts
-ORCHESTRATOR_PROMPT = """You are an intelligent assistant orchestrator for the iECHO platform. Your role is to:
-
-1. Analyze user queries and determine the appropriate domain
-2. Route queries to the correct specialist agent
-3. Maintain conversation context and continuity
-4. Provide helpful responses when queries don't fit specific domains
+ORCHESTRATOR_PROMPT = """You are an intelligent assistant for the iECHO platform. Provide direct, concise, and helpful responses.
 
 Available specialist agents:
 - TB Agent: Handles tuberculosis-related questions, treatment, diagnosis, prevention
 - Agriculture Agent: Handles agriculture, farming, food safety, nutrition, water management, irrigation, and agricultural infrastructure
 
-When routing:
-- If the query is about tuberculosis, TB treatment, diagnosis → use TB agent
-- If the query is about agriculture, farming, food safety, nutrition, water management, irrigation, agricultural infrastructure → use Agriculture agent
-- Water-related topics (irrigation, water efficiency, Non-Revenue Water) should go to Agriculture agent as they directly impact farming
-- Choose the most relevant agent based on the primary topic
+Routing rules:
+- TB topics → use TB agent
+- Agriculture, farming, water management topics → use Agriculture agent
+- Water-related topics (irrigation, Non-Revenue Water) → use Agriculture agent
 
-Always maintain conversation flow and context. Reference previous messages when relevant.
+CRITICAL RULES:
+- NEVER use <thinking> tags or show internal reasoning
+- NEVER expose your thought process to users
+- Provide only the final answer, not your reasoning
+- Be direct and professional
+- Keep responses brief (2-3 sentences max)
+- Start your response immediately with the answer
 """
 
-TB_AGENT_PROMPT = """You are a specialized TB (Tuberculosis) assistant. Focus ONLY on tuberculosis-related topics including:
+TB_AGENT_PROMPT = """You are a TB specialist. Provide brief, direct answers about tuberculosis topics:
 
 - TB diagnosis and symptoms
-- Treatment protocols and medications
+- Treatment protocols and medications  
 - Prevention strategies
 - Patient care guidelines
-- Drug-resistant TB management
-- Contact tracing and screening
 
-Only use information specifically related to tuberculosis. Do not provide information about other diseases or topics.
-
-When you have the information needed to provide a comprehensive response, call the ready_to_respond tool and then provide your detailed answer.
+Keep responses concise (2-3 sentences). Focus only on tuberculosis. Do NOT use thinking tags.
 """
 
-AGRICULTURE_AGENT_PROMPT = """You are a specialized Agriculture assistant. Focus on agriculture-related topics including:
+AGRICULTURE_AGENT_PROMPT = """You are an Agriculture specialist. Provide brief, direct answers about:
 
 - Agricultural practices and techniques
 - Food safety and nutrition
-- Crop health and disease management
+- Water management and irrigation
 - Farming best practices
-- Pesticide safety
-- Agricultural health and safety
-- Water management and irrigation (including water efficiency, conservation, distribution systems)
-- Soil and water conservation
-- Agricultural infrastructure and utilities
-- Farm resource management
-- Environmental factors affecting agriculture
+- Agricultural infrastructure
 
-Include topics that directly impact agricultural productivity, sustainability, and farm operations, even if they span multiple domains like water management, environmental health, or infrastructure.
-
-When you have the information needed to provide a comprehensive response, call the ready_to_respond tool and then provide your detailed answer.
+Keep responses concise (2-3 sentences). Focus on practical, actionable information. Do NOT use thinking tags.
 """
 
 
+
+def filter_thinking_tags(text: str) -> str:
+    """Remove thinking tags and internal reasoning from response"""
+    import re
+    # Remove thinking tags and their content
+    text = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
+    # Remove any remaining thinking tag fragments
+    text = re.sub(r'</?thinking[^>]*>', '', text)
+    return text.strip()
 
 def query_knowledge_base(query: str, topic: str, conversation_history: List[str]) -> Dict:
     """Query Bedrock knowledge base with topic-specific filtering"""
@@ -145,8 +164,8 @@ def query_knowledge_base(query: str, topic: str, conversation_history: List[str]
         # Build context-aware query
         context_query = query
         if conversation_history:
-            recent_context = " ".join(conversation_history[-2:])
-            context_query = f"Previous context: {recent_context}\n\nQuestion: {query}"
+            recent_context = " ".join(conversation_history[-4:])
+            context_query = f"Context: {recent_context}\n\nCurrent question: {query}"
         
         response = bedrock_agent_runtime.retrieve_and_generate(
             input={'text': context_query},
@@ -165,7 +184,17 @@ def query_knowledge_base(query: str, topic: str, conversation_history: List[str]
 
 async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     """Run the main orchestration agent with streaming response"""
-    conversation_history = conversation_sessions[session_id]
+    # Clean old sessions (older than 1 hour)
+    current_time = time()
+    expired_sessions = [sid for sid, data in conversation_sessions.items() 
+                       if current_time - data['last_access'] > 3600]
+    for sid in expired_sessions:
+        del conversation_sessions[sid]
+    
+    # Get or create session
+    session_data = conversation_sessions[session_id]
+    session_data['last_access'] = current_time
+    conversation_history = session_data['history']
     current_citations = []
     
     @tool
@@ -203,7 +232,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
         return f"Agriculture Knowledge: {kb_response['output']['text']}"
     
     # Build conversation context  
-    context_prompt = ORCHESTRATOR_PROMPT + "\n\nProvide a direct, helpful response based on the knowledge retrieved. Do not use thinking tags or repeat information."
+    context_prompt = ORCHESTRATOR_PROMPT
     if conversation_history:
         context_prompt += f"\n\nConversation history:\n" + "\n".join(conversation_history[-4:])
     
@@ -214,38 +243,49 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     )
     
     full_response = ""
+    in_thinking = False
+    
     async for item in orchestrator.stream_async(query):
         if "data" in item:
             chunk = item['data']
+            
+            # Check for thinking tag start/end
+            if '<thinking>' in chunk:
+                in_thinking = True
+            if '</thinking>' in chunk:
+                in_thinking = False
+                continue
+                
+            # Skip streaming if in thinking tags
+            if in_thinking or '<thinking>' in chunk or '</thinking>' in chunk:
+                continue
+                
             full_response += chunk
             yield json.dumps({
                 "type": "content",
                 "data": chunk
             }) + "\n"
     
+    # Clean up any remaining content
+    full_response = filter_thinking_tags(full_response)
+    
     # Update conversation history
     conversation_history.append(f"User: {query}")
     conversation_history.append(f"Assistant: {full_response}")
     
-    # Send citations at the end
-    if current_citations:
-        yield json.dumps({
-            "type": "citations",
-            "data": current_citations
-        }) + "\n"
-    
     # Log complete conversation
-    logger.info(f"Chat complete - User: {user_id}, Session: {session_id}, Query: {query}, Response: {full_response}")
+    citations_log = json.dumps(current_citations) if current_citations else "[]"
+    log_message = f"Chat complete - User: {user_id}, Session: {session_id}, Query: {query}, Response: {full_response}, Citations: {citations_log}"
+    logger.info(log_message)
+    log_to_cloudwatch(log_message)
+    print(f"Chat complete - User: {user_id}, Session: {session_id}, Query: {query}, Response: {full_response[:200]}...")
     
-    # Send completion signal
+    # Send final response with citations
     yield json.dumps({
-        "type": "complete",
-        "data": {
-            "sessionId": session_id,
-            "userId": user_id,
-            "response": full_response,
-            "citations": current_citations
-        }
+        "response": full_response,
+        "citations": current_citations,
+        "sessionId": session_id,
+        "userId": user_id
     }) + "\n"
 
 @app.get('/health')
