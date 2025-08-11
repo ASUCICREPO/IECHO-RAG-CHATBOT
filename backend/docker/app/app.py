@@ -75,7 +75,6 @@ s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 # Environment variables
 KNOWLEDGE_BASE_ID = os.environ.get('KNOWLEDGE_BASE_ID', '')
 FEEDBACK_TABLE_NAME = os.environ.get('FEEDBACK_TABLE_NAME', 'iecho-feedback-table')
-DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET', '')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
 
 # Session storage for conversation context (with TTL)
@@ -182,19 +181,11 @@ def query_knowledge_base(query: str, topic: str, conversation_history: List[str]
         logger.error(f"Error querying knowledge base: {str(e)}")
         return {'output': {'text': f"I apologize, but I'm having trouble accessing the knowledge base right now. Error: {str(e)}"}}
 
-async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
-    """Run the main orchestration agent with streaming response"""
-    # Clean old sessions (older than 1 hour)
-    current_time = time()
-    expired_sessions = [sid for sid, data in conversation_sessions.items() 
-                       if current_time - data['last_access'] > 3600]
-    for sid in expired_sessions:
-        del conversation_sessions[sid]
+def create_agent_tools(conversation_history: List[str] = None):
+    """Create reusable agent tools"""
+    if conversation_history is None:
+        conversation_history = []
     
-    # Get or create session
-    session_data = conversation_sessions[session_id]
-    session_data['last_access'] = current_time
-    conversation_history = session_data['history']
     current_citations = []
     
     @tool
@@ -212,7 +203,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
                         'excerpt': reference.get('content', {}).get('text', '')[:200] + "..."
                     })
         
-        return f"TB Knowledge: {kb_response['output']['text']}"
+        return kb_response['output']['text']
     
     @tool
     def route_to_agriculture_agent(user_query: str) -> str:
@@ -229,7 +220,27 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
                         'excerpt': reference.get('content', {}).get('text', '')[:200] + "..."
                     })
         
-        return f"Agriculture Knowledge: {kb_response['output']['text']}"
+        return kb_response['output']['text']
+    
+    return [route_to_tb_agent, route_to_agriculture_agent], current_citations
+
+async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
+    """Run the main orchestration agent with streaming response"""
+    # Clean old sessions (older than 1 hour)
+    current_time = time()
+    expired_sessions = [sid for sid, data in conversation_sessions.items() 
+                       if current_time - data['last_access'] > 3600]
+    for sid in expired_sessions:
+        del conversation_sessions[sid]
+    
+    # Get or create session
+    session_data = conversation_sessions[session_id]
+    session_data['last_access'] = current_time
+    conversation_history = session_data['history']
+    current_citations = []
+    
+    # Use shared tools
+    tools, current_citations = create_agent_tools(conversation_history)
     
     # Build conversation context  
     context_prompt = ORCHESTRATOR_PROMPT
@@ -238,7 +249,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     
     orchestrator = Agent(
         system_prompt=context_prompt,
-        tools=[route_to_tb_agent, route_to_agriculture_agent],
+        tools=tools,
         model="us.amazon.nova-lite-v1:0"
     )
     
@@ -273,18 +284,22 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     conversation_history.append(f"User: {query}")
     conversation_history.append(f"Assistant: {full_response}")
     
+    # Generate unique response ID for this specific response
+    response_id = str(uuid4())
+    
     # Log complete conversation
     citations_log = json.dumps(current_citations) if current_citations else "[]"
-    log_message = f"Chat complete - User: {user_id}, Session: {session_id}, Query: {query}, Response: {full_response}, Citations: {citations_log}"
+    log_message = f"Chat complete - User: {user_id}, Session: {session_id}, Response: {response_id}, Query: {query}, Response: {full_response}, Citations: {citations_log}"
     logger.info(log_message)
     log_to_cloudwatch(log_message)
-    print(f"Chat complete - User: {user_id}, Session: {session_id}, Query: {query}, Response: {full_response[:200]}...")
+    print(f"Chat complete - User: {user_id}, Session: {session_id}, Response: {response_id}, Query: {query}, Response: {full_response[:200]}...")
     
     # Send final response with citations
     yield json.dumps({
         "response": full_response,
         "citations": current_citations,
         "sessionId": session_id,
+        "responseId": response_id,
         "userId": user_id
     }) + "\n"
 
@@ -299,7 +314,7 @@ def health_check():
 
 @app.post('/chat')
 async def chat(request: ChatRequest):
-    """Send a chat message and receive AI-generated streaming response."""
+    """Fast non-streaming chat with agent routing for API Gateway compatibility."""
     try:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
@@ -307,10 +322,58 @@ async def chat(request: ChatRequest):
         if not KNOWLEDGE_BASE_ID:
             raise HTTPException(status_code=500, detail="Knowledge Base not configured")
         
-        # Generate session ID if not provided
         session_id = request.sessionId or str(uuid4())
+        response_id = str(uuid4())
         
+        # Use same agent routing as streaming endpoint
+        tools, current_citations = create_agent_tools([])
+        
+        # Fast agent without streaming
+        agent = Agent(
+            system_prompt=ORCHESTRATOR_PROMPT,
+            tools=tools,
+            model="us.amazon.nova-lite-v1:0"
+        )
+        
+        # Collect full response from streaming
+        full_response = ""
+        async for item in agent.stream_async(request.query):
+            if "data" in item:
+                chunk = item['data']
+                if '<thinking>' not in chunk and '</thinking>' not in chunk:
+                    full_response += chunk
+        
+        response_text = filter_thinking_tags(full_response)
+        citations = current_citations
+        
+        # Log
+        log_message = f"Chat complete - User: {request.userId}, Session: {session_id}, Response: {response_id}, Query: {request.query}, Response: {response_text}"
+        logger.info(log_message)
+        log_to_cloudwatch(log_message)
+        
+        return {
+            "response": response_text,
+            "citations": citations,
+            "sessionId": session_id,
+            "responseId": response_id,
+            "userId": request.userId
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in chat endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
+@app.post('/chat-stream')
+async def chat_stream(request: ChatRequest):
+    """Streaming chat endpoint for direct ALB access."""
+    try:
+        if not request.query.strip():
+            raise HTTPException(status_code=400, detail="Query cannot be empty")
+        
+        if not KNOWLEDGE_BASE_ID:
+            raise HTTPException(status_code=500, detail="Knowledge Base not configured")
+        
+        session_id = request.sessionId or str(uuid4())
         
         return StreamingResponse(
             run_orchestrator_agent(request.query, session_id, request.userId),
@@ -318,7 +381,7 @@ async def chat(request: ChatRequest):
         )
         
     except Exception as e:
-        logger.error(f"Error in chat endpoint: {str(e)}")
+        logger.error(f"Error in chat-stream endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post('/feedback')
@@ -356,12 +419,29 @@ async def submit_feedback(request: FeedbackRequest):
 async def list_documents():
     """List processed documents in the knowledge base."""
     try:
-        if not DOCUMENTS_BUCKET:
-            raise HTTPException(status_code=500, detail="Documents bucket not configured")
+        if not KNOWLEDGE_BASE_ID:
+            raise HTTPException(status_code=500, detail="Knowledge Base not configured")
+        
+        # Get data sources from Knowledge Base
+        bedrock = boto3.client('bedrock-agent', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
+        data_sources = bedrock.list_data_sources(knowledgeBaseId=KNOWLEDGE_BASE_ID)
+        
+        if not data_sources.get('dataSourceSummaries'):
+            raise HTTPException(status_code=500, detail="No data sources found in Knowledge Base")
+        
+        # Get S3 bucket from first data source
+        data_source = data_sources['dataSourceSummaries'][0]
+        data_source_detail = bedrock.get_data_source(
+            knowledgeBaseId=KNOWLEDGE_BASE_ID,
+            dataSourceId=data_source['dataSourceId']
+        )
+        
+        s3_config = data_source_detail['dataSource']['dataSourceConfiguration']['s3Configuration']
+        bucket_name = s3_config['bucketArn'].split(':')[-1]
         
         # List objects in the processed folder
         response = s3.list_objects_v2(
-            Bucket=DOCUMENTS_BUCKET,
+            Bucket=bucket_name,
             Prefix='processed/',
             MaxKeys=100
         )
@@ -393,7 +473,7 @@ async def get_status():
         "service": "iECHO RAG Chatbot API",
         "status": "running",
         "knowledgeBaseConfigured": bool(KNOWLEDGE_BASE_ID),
-        "documentsConfigured": bool(DOCUMENTS_BUCKET),
+        "documentsConfigured": bool(KNOWLEDGE_BASE_ID),
         "feedbackConfigured": bool(FEEDBACK_TABLE_NAME),
         "region": os.environ.get('AWS_REGION', 'us-west-2'),
         "timestamp": datetime.utcnow().isoformat()
