@@ -75,3 +75,22 @@ venv.bak/
 
 # pyenv
 .python-version
+
+# Next.js (frontend)
+.next/
+*.tsbuildinfo
+next-env.d.ts
+
+# Package managers
+pnpm-lock.yaml
+yarn.lock
+package-lock.json
+
+# CDK Assets
+cdk.context.json
+
+# Local environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
