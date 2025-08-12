@@ -1016,21 +1016,23 @@ export default function Component() {
         </div>
       </header>
 
-      <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-2 sm:py-4 overflow-y-auto pb-20">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-start gap-3 mb-4 sm:mb-8">
-            <Avatar className="w-8 h-8 sm:w-12 sm:h-12 bg-[#fb2c36] text-white flex-shrink-0">
+      <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-2 sm:py-4 overflow-y-auto pb-32">
+        {/* Chat Area */}
+        <div className="p-3 sm:p-6 mx-2 sm:mx-4">
+          {/* Banner positioned like chat messages */}
+          <div className="flex items-start gap-3 mb-4">
+            <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
               <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
             </Avatar>
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 sm:p-6 flex-1">
-              <h1 className="text-lg sm:text-3xl font-bold text-[#101828] dark:text-white mb-2 sm:mb-3">iECHO AI Assistant</h1>
-              <p className="text-xs sm:text-lg text-[#4a5565] dark:text-gray-300 mb-3 sm:mb-4">Hello! 👋 I'm your iECHO AI assistant, ready to help with TB management and agriculture questions. I can educate you about TB treatment, NTEP guidelines, Nikshay system, and sustainable farming practices.</p>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-2 sm:p-3 flex-1">
+              <h1 className="text-sm sm:text-lg font-bold text-[#101828] dark:text-white mb-1 sm:mb-2">iECHO AI Assistant</h1>
+              <p className="text-xs sm:text-base text-[#4a5565] dark:text-gray-300">Hello! 👋 I'm your iECHO AI assistant, ready to help with TB management and agriculture questions. I can educate you about TB treatment, NTEP guidelines, Nikshay system, and sustainable farming practices.</p>
             </div>
           </div>
 
           {/* Question Cards */}
           {showQuickStart && (
-            <div className="grid gap-1 sm:gap-2 mb-2 sm:mb-4">
+            <div className="ml-11 mr-11 grid gap-1 sm:gap-2 mb-4">
               <h2 className="text-sm sm:text-xl font-semibold text-gray-800 dark:text-white mb-1">Quick Start</h2>
               <div className="grid md:grid-cols-2 gap-1 sm:gap-2">
                 {questionCards.map((question, index) => (
@@ -1052,15 +1054,9 @@ export default function Component() {
               </div>
             </div>
           )}
-        </div>
-
-
-
-        {/* Chat Area */}
-        <div className="p-3 sm:p-6 mx-2 sm:mx-4">
 
           {/* Show chat messages */}
-          <div className="flex-1 overflow-y-auto space-y-4">
+          <div className="flex-1 overflow-y-auto space-y-4 pb-16">
             {chatHistory.map((message) => (
               <div key={message.id} className="relative">
                 <ChatMessage 
@@ -1111,7 +1107,7 @@ export default function Component() {
               <Button
                 size="icon"
                 className="w-11 h-11 rounded-full bg-gray-400 hover:bg-gray-500 text-white flex-shrink-0"
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={isChatLoading || !query.trim()}
                 aria-label="Send message"
               >
