@@ -110,13 +110,22 @@ ORCHESTRATOR_PROMPT = """You are an intelligent assistant for the iECHO platform
 Available specialist agents:
 - TB Agent: Handles tuberculosis-related questions, treatment, diagnosis, prevention
 - Agriculture Agent: Handles agriculture, farming, food safety, nutrition, water management, irrigation, and agricultural infrastructure
+- General Knowledge Search: For other topics not covered by TB or Agriculture agents
 
 Routing rules:
 - TB topics → use TB agent
-- Agriculture, farming, water management topics → use Agriculture agent
-- Water-related topics (irrigation, Non-Revenue Water) → use Agriculture agent
+- Agriculture, farming, crop rotation, water management topics → use Agriculture agent
+- Other topics → use General Knowledge Search as fallback
+- ALWAYS try to answer using specialist agents first, then fallback to general search
+
+Context handling:
+- ALWAYS use conversation history to resolve pronouns and references
+- Look at the most recent topics discussed to understand what pronouns refer to
+- Use context clues from previous exchanges to infer meaning
+- Only ask for clarification if absolutely no context exists in conversation history
 
 CRITICAL RULES:
+- NEVER refuse to answer questions - always try specialist agents first, then general search
 - NEVER use <thinking> tags or show internal reasoning
 - NEVER expose your thought process to users
 - Provide only the final answer, not your reasoning
@@ -160,11 +169,15 @@ def filter_thinking_tags(text: str) -> str:
 def query_knowledge_base(query: str, topic: str, conversation_history: List[str]) -> Dict:
     """Query Bedrock knowledge base with topic-specific filtering"""
     try:
-        # Build context-aware query
+        # Build context-aware query with immediate context
         context_query = query
         if conversation_history:
-            recent_context = " ".join(conversation_history[-4:])
-            context_query = f"Context: {recent_context}\n\nCurrent question: {query}"
+            # Get the most recent user question for better context
+            recent_user_queries = [h for h in conversation_history[-4:] if h.startswith('User:')]
+            if recent_user_queries:
+                context_query = f"Previous question: {recent_user_queries[-1]}\nCurrent question: {query}"
+            else:
+                context_query = f"Context: {' '.join(conversation_history[-2:])}\n\nCurrent question: {query}"
         
         response = bedrock_agent_runtime.retrieve_and_generate(
             input={'text': context_query},
@@ -192,6 +205,7 @@ def create_agent_tools(conversation_history: List[str] = None):
     def route_to_tb_agent(user_query: str) -> str:
         """Route the query to the TB specialist agent for tuberculosis-related questions"""
         nonlocal current_citations
+        current_citations.clear()  # Clear previous citations when switching agents
         kb_response = query_knowledge_base(user_query, "tuberculosis", conversation_history)
         
         if 'citations' in kb_response:
@@ -213,6 +227,7 @@ def create_agent_tools(conversation_history: List[str] = None):
     def route_to_agriculture_agent(user_query: str) -> str:
         """Route the query to the Agriculture specialist agent for farming and food safety questions"""
         nonlocal current_citations
+        current_citations.clear()  # Clear previous citations when switching agents
         kb_response = query_knowledge_base(user_query, "agriculture", conversation_history)
         
         if 'citations' in kb_response:
@@ -230,7 +245,34 @@ def create_agent_tools(conversation_history: List[str] = None):
         
         return kb_response['output']['text']
     
-    return [route_to_tb_agent, route_to_agriculture_agent], current_citations
+    @tool
+    def search_general_knowledge(user_query: str) -> str:
+        """Search the knowledge base for general queries that don't fit TB or Agriculture categories"""
+        nonlocal current_citations
+        current_citations.clear()
+        kb_response = query_knowledge_base(user_query, "general", conversation_history)
+        
+        if 'citations' in kb_response:
+            for citation in kb_response['citations']:
+                for reference in citation.get('retrievedReferences', []):
+                    content_text = reference.get('content', {}).get('text', '')
+                    doc_uri = reference.get('location', {}).get('s3Location', {}).get('uri', '')
+                    title = doc_uri.split('/')[-1].replace('.pdf', '') if doc_uri else 'Document'
+                    
+                    current_citations.append({
+                        'title': title,
+                        'source': doc_uri,
+                        'excerpt': content_text
+                    })
+        
+        # Check if response is meaningful
+        response_text = kb_response['output']['text']
+        if 'cannot find' in response_text.lower() or 'no information' in response_text.lower() or len(response_text.strip()) < 20:
+            return "I don't have information about this topic in my knowledge base. Please ask about TB management or agriculture topics."
+        
+        return response_text
+    
+    return [route_to_tb_agent, route_to_agriculture_agent, search_general_knowledge], current_citations
 
 async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     """Run the main orchestration agent with streaming response"""
@@ -247,13 +289,27 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     conversation_history = session_data['history']
     current_citations = []
     
+    # Use original query - let orchestrator handle ambiguity
+    enhanced_query = query
+    
+    # Debug log
+    if enhanced_query != query:
+        logger.info(f"Query enhanced: '{query}' -> '{enhanced_query}'")
+        print(f"Query enhanced: '{query}' -> '{enhanced_query}'")
+    
     # Use shared tools
     tools, current_citations = create_agent_tools(conversation_history)
     
-    # Build conversation context  
+    # Build conversation context with immediate context emphasis
     context_prompt = ORCHESTRATOR_PROMPT
     if conversation_history:
-        context_prompt += f"\n\nConversation history:\n" + "\n".join(conversation_history[-4:])
+        recent_context = "\n".join(conversation_history[-4:])
+        context_prompt += f"\n\nConversation history:\n{recent_context}"
+        
+        # Emphasize the most recent user question for pronoun resolution
+        last_user_query = [h for h in conversation_history[-2:] if h.startswith('User:')]
+        if last_user_query:
+            context_prompt += f"\n\nIMPORTANT: The user's previous question was: {last_user_query[-1]}"
     
     orchestrator = Agent(
         system_prompt=context_prompt,
@@ -264,7 +320,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     full_response = ""
     in_thinking = False
     
-    async for item in orchestrator.stream_async(query):
+    async for item in orchestrator.stream_async(enhanced_query):
         if "data" in item:
             chunk = item['data']
             
@@ -289,7 +345,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     full_response = filter_thinking_tags(full_response)
     
     # Update conversation history
-    conversation_history.append(f"User: {query}")
+    conversation_history.append(f"User: {enhanced_query}")
     conversation_history.append(f"Assistant: {full_response}")
     
     # Generate unique response ID for this specific response
