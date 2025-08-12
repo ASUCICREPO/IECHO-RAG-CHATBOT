@@ -197,10 +197,14 @@ def create_agent_tools(conversation_history: List[str] = None):
         if 'citations' in kb_response:
             for citation in kb_response['citations']:
                 for reference in citation.get('retrievedReferences', []):
+                    content_text = reference.get('content', {}).get('text', '')
+                    doc_uri = reference.get('location', {}).get('s3Location', {}).get('uri', '')
+                    title = doc_uri.split('/')[-1].replace('.pdf', '') if doc_uri else 'Document'
+                    
                     current_citations.append({
-                        'title': reference.get('content', {}).get('text', '')[:100] + "...",
-                        'source': reference.get('location', {}).get('s3Location', {}).get('uri', ''),
-                        'excerpt': reference.get('content', {}).get('text', '')[:200] + "..."
+                        'title': title,
+                        'source': doc_uri,
+                        'excerpt': content_text
                     })
         
         return kb_response['output']['text']
@@ -214,10 +218,14 @@ def create_agent_tools(conversation_history: List[str] = None):
         if 'citations' in kb_response:
             for citation in kb_response['citations']:
                 for reference in citation.get('retrievedReferences', []):
+                    content_text = reference.get('content', {}).get('text', '')
+                    doc_uri = reference.get('location', {}).get('s3Location', {}).get('uri', '')
+                    title = doc_uri.split('/')[-1].replace('.pdf', '') if doc_uri else 'Document'
+                    
                     current_citations.append({
-                        'title': reference.get('content', {}).get('text', '')[:100] + "...",
-                        'source': reference.get('location', {}).get('s3Location', {}).get('uri', ''),
-                        'excerpt': reference.get('content', {}).get('text', '')[:200] + "..."
+                        'title': title,
+                        'source': doc_uri,
+                        'excerpt': content_text
                     })
         
         return kb_response['output']['text']
@@ -465,6 +473,31 @@ async def list_documents():
     except Exception as e:
         logger.error(f"Error in documents endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get('/document-url/{path:path}')
+async def get_document_url(path: str):
+    """Generate presigned URL for S3 document."""
+    try:
+        # Extract bucket and key from s3:// URL
+        if path.startswith('s3://'):
+            parts = path.replace('s3://', '').split('/', 1)
+            bucket = parts[0]
+            key = parts[1] if len(parts) > 1 else ''
+        else:
+            raise HTTPException(status_code=400, detail="Invalid S3 URL format")
+        
+        # Generate presigned URL (valid for 1 hour)
+        url = s3.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket, 'Key': key},
+            ExpiresIn=3600
+        )
+        
+        return {"url": url}
+        
+    except Exception as e:
+        logger.error(f"Error generating presigned URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate document URL: {str(e)}")
 
 @app.get('/status')
 async def get_status():

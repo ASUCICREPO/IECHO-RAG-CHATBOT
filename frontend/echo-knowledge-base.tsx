@@ -10,34 +10,29 @@ import {
   AlertCircle,
   ArrowRight, 
   ChevronDown, 
-  FileText, 
   Globe, 
   Heart, 
   Home, 
   MessageSquare, 
   Mic, 
   MoreVertical, 
-  RefreshCw, 
-  Search,
+  RefreshCw,
   Send, 
   Star, 
   X 
 } from "lucide-react";
-import { formatDistanceToNow } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Badge } from "@/components/ui/badge"
+
 
 const questionCards = [
   "What causes TB - bacterial, viral or both?",
-  "What is the full form of DOTS?",
-  "When was RNTCP renamed to NTEP?",
+  "What are the main symptoms of pulmonary TB?",
   "What is Ni-Kshay used for?",
-  "DRTB categories and treatment",
-  "CHO counselling role",
-  "DBT benefits for TB patients",
-  "Nikshay platform features",
+  "How to improve crop irrigation efficiency?",
+  "What are sustainable farming practices?",
+  "What is crop rotation?",
 ]
 
 interface Citation {
@@ -85,12 +80,55 @@ function CitationList({ citations }: { citations: Citation[] }) {
       </button>
       
       {expanded && (
-        <div className="mt-2 space-y-2 pl-4 border-l-2 border-gray-200">
+        <div className="mt-2 space-y-1.5 pl-3 border-l-2 border-blue-200">
           {citations.map((cite, i) => (
-            <div key={i} className="p-2 bg-gray-50 rounded text-xs">
-              <div className="font-medium">{cite.title}</div>
-              <div className="text-gray-500 text-xs">{cite.source}</div>
-              <p className="text-xs mt-1 text-gray-700">{cite.excerpt}</p>
+            <div key={i} className="p-2 bg-blue-50/50 border border-blue-100 rounded text-xs">
+              <div className="font-medium text-gray-800 mb-1">
+                {cite.title.replace(/^#+\s*/, '').replace(/##\s*/g, ' - ')}
+              </div>
+              <div className="mb-1">
+                {cite.source.startsWith('s3://') ? (
+                  <button 
+                    onClick={async () => {
+                      try {
+                        const encodedPath = encodeURIComponent(cite.source);
+                        const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/document-url/${encodedPath}`);
+                        if (!response.ok) {
+                          throw new Error(`HTTP ${response.status}`);
+                        }
+                        const data = await response.json();
+                        if (data.url) {
+                          window.open(data.url, '_blank');
+                        } else {
+                          alert('Document URL not available');
+                        }
+                      } catch (error) {
+                        console.error('Failed to get document URL:', error);
+                        alert('Failed to open document');
+                      }
+                    }}
+                    className="text-blue-700 hover:text-blue-900 hover:bg-blue-100 px-1 py-0.5 rounded transition-colors text-xs font-medium"
+                  >
+                    📄 {cite.source.split('/').pop()?.replace('.pdf', '') || cite.source}
+                  </button>
+                ) : (
+                  <span className="text-gray-600 text-xs">
+                    📄 {cite.source}
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-gray-600 leading-relaxed">
+                {(() => {
+                  const cleanExcerpt = cite.excerpt
+                    .replace(/^#+\s*/gm, '')
+                    .replace(/\*\*(.*?)\*\*/g, '$1')
+                    .replace(/\*(.*?)\*/g, '$1')
+                    .replace(/##\s*/g, ' - ')
+                    .trim();
+                  return cleanExcerpt.length > 200 ? cleanExcerpt.substring(0, 200) + '...' : cleanExcerpt;
+                })()
+                }
+              </div>
             </div>
           ))}
         </div>
@@ -346,15 +384,14 @@ export default function Component() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/chat`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/chat-stream`, {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
           query: userMessage, 
-          userId: 'api-user', // TODO: Replace with actual user ID when auth is implemented
+          userId: 'api-user',
           sessionId: getOrCreateSessionId()
         }),
         signal: controller.signal
@@ -363,28 +400,73 @@ export default function Component() {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errorData: ApiError = await response.json().catch(() => ({
-          detail: response.statusText || 'Unknown error occurred'
-        }));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      const data: ChatResponse = await response.json();
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamedText = '';
+      let finalData: ChatResponse | null = null;
+      const aiMessageId = `ai-${Date.now()}`;
       
-      if (!data.responseId || !data.response) {
-        throw new Error('Invalid response format from server');
-      }
-      
-      setLatestResponseId(data.responseId);
-      
-      // Add AI response to history with responseId and citations
+      // Add placeholder AI message
       setChatHistory(prev => [...prev, { 
-        id: data.responseId,
+        id: aiMessageId,
         sender: 'ai', 
-        text: data.response,
-        responseId: data.responseId,
-        citations: data.citations || []
+        text: '',
+        citations: []
       }]);
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const data = JSON.parse(line);
+                
+                if (data.type === 'content' && data.data) {
+                  streamedText += data.data;
+                  setChatHistory(prev => prev.map(msg => 
+                    msg.id === aiMessageId 
+                      ? { ...msg, text: streamedText }
+                      : msg
+                  ));
+                  // Add delay to slow down streaming effect
+                  await new Promise(resolve => setTimeout(resolve, 30));
+                } else if (data.response && data.citations !== undefined) {
+                  finalData = data;
+                }
+              } catch (parseError) {
+                console.warn('Parse error:', parseError);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      if (finalData) {
+        setLatestResponseId(finalData.responseId);
+        setChatHistory(prev => prev.map(msg => 
+          msg.id === aiMessageId 
+            ? { 
+                ...msg, 
+                text: finalData.response,
+                responseId: finalData.responseId,
+                citations: finalData.citations || []
+              }
+            : msg
+        ));
+      }
 
     } catch (error) {
       console.error('Chat error:', error);
@@ -405,143 +487,9 @@ export default function Component() {
     }
   }
 
-  // Documents state with proper typing
-  const [documents, setDocuments] = useState<Array<{
-    id: string;
-    title?: string;
-    name?: string;
-    description?: string;
-    source?: string;
-    updatedAt?: string | Date;
-    createdAt?: string | Date;
-    category?: string;
-  }>>([]);
-  
-  const [isDocumentsLoading, setIsDocumentsLoading] = useState(false);
-  const [documentsError, setDocumentsError] = useState<string | null>(null);
-  
-  // Search and filter state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  
-  // Document pagination state
-  const [docCurrentPage, setDocCurrentPage] = useState(1);
-  const itemsPerPage = 6; // Show 6 items per page
-  
-  // Filter documents based on search query and selected category
-  const filteredDocuments = useMemo(() => {
-    return documents.filter(doc => {
-      const matchesSearch = searchQuery === '' || 
-        (doc.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-         doc.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-         doc.source?.toLowerCase().includes(searchQuery.toLowerCase()));
-      
-      const matchesCategory = selectedCategory === 'All' || 
-        doc.category === selectedCategory;
-      
-      return matchesSearch && matchesCategory;
-    });
-  }, [documents, searchQuery, selectedCategory]);
-  
-  // Calculate pagination
-  const totalPages = Math.ceil(filteredDocuments.length / itemsPerPage);
-  const currentDocuments = useMemo(() => {
-    const startIndex = (docCurrentPage - 1) * itemsPerPage;
-    return filteredDocuments.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredDocuments, docCurrentPage]);
-  
-  // Reset to first page when filters change
-  useEffect(() => {
-    setDocCurrentPage(1);
-  }, [searchQuery, selectedCategory]);
-  
-  // Handle document click
-  const handleDocumentClick = (doc: any) => {
-    // For now, just log the click. Can be extended to open a preview/modal
-    console.log('Document clicked:', doc);
-  };
 
-  // Fetch documents from API
-  const fetchDocuments = async () => {
-    setIsDocumentsLoading(true);
-    setDocumentsError(null);
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/documents`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch documents');
-      }
-      const data = await response.json();
-      
-      // Normalize document data to ensure consistent structure
-      const normalizedDocuments = Array.isArray(data) ? data.map(doc => ({
-        id: doc.id || '',
-        title: doc.title || doc.name || 'Untitled Document',
-        description: doc.description || 'No description available',
-        source: doc.source || 'Unknown source',
-        updatedAt: doc.updatedAt || new Date().toISOString(),
-        createdAt: doc.createdAt || new Date().toISOString(),
-        category: doc.category || 'Uncategorized'
-      })) : [];
-      
-      setDocuments(normalizedDocuments);
-    } catch (error) {
-      console.error('Error fetching documents:', error);
-      setDocumentsError('Failed to load documents. Please try again later.');
-    } finally {
-      setIsDocumentsLoading(false);
-    }
-  };
 
-  // Fetch status and documents on mount
-  useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/status`);
-        if (!res.ok) throw new Error('API error');
-        const data = await res.json();
-        setApiStatus('online');
-      } catch (e) {
-        setApiStatus('error');
-      }
-    };
 
-    const fetchDocuments = async () => {
-      setIsDocumentsLoading(true);
-      setDocumentsError(null);
-      try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/documents`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        
-        // Normalize the response to ensure we always have an array of documents
-        const documents = Array.isArray(data.documents) ? data.documents : 
-                         Array.isArray(data) ? data : [];
-        
-        // Add default values for required fields
-        const normalizedDocs = documents.map((doc: any) => ({
-          id: doc.id || Math.random().toString(36).substr(2, 9),
-          title: doc.title || doc.name || 'Untitled Document',
-          description: doc.description || '',
-          source: doc.source || 'Unknown Source',
-          updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
-          createdAt: doc.createdAt || new Date().toISOString(),
-          category: doc.category || 'Uncategorized'
-        }));
-        
-        setDocuments(normalizedDocs);
-      } catch (error) {
-        console.error('Error fetching documents:', error);
-        setDocumentsError(error instanceof Error ? error.message : 'Failed to load documents');
-      } finally {
-        setIsDocumentsLoading(false);
-      }
-    };
-
-    fetchStatus();
-    fetchDocuments();
-  }, []);
 
   // Health check function 
   const fetchHealth = async () => {
@@ -1073,8 +1021,8 @@ export default function Component() {
       <main className="flex-1 bg-gray-50 dark:bg-gray-900 py-8">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 mb-8">
-            <h1 className="text-3xl font-bold text-[#101828] dark:text-white mb-3">Welcome to your knowledge</h1>
-            <p className="text-[#4a5565] dark:text-gray-300 text-lg mb-4">Ask me anything about NTEP guidelines, TB management, or related topics.</p>
+            <h1 className="text-3xl font-bold text-[#101828] dark:text-white mb-3">iECHO AI Assistant</h1>
+            <p className="text-[#4a5565] dark:text-gray-300 text-lg mb-4">Your intelligent companion for TB management and agricultural guidance. Ask questions, get expert insights.</p>
             <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
               <span>API Status:</span>
               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -1096,11 +1044,11 @@ export default function Component() {
                   key={index}
                   variant="outline"
                   className="justify-start text-left h-auto p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-normal rounded-lg transition-colors duration-200"
-                  onClick={() => handleQuestionClick(question)}
+                  onClick={() => setQuery(question)}
                 >
-                  <div className="flex items-center">
-                    <MessageSquare className="h-4 w-4 mr-2 text-blue-500" />
-                    <span>{question}</span>
+                  <div className="flex items-start gap-2">
+                    <MessageSquare className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
+                    <span className="text-sm leading-relaxed break-words">{question}</span>
                   </div>
                 </Button>
               ))}
@@ -1108,177 +1056,10 @@ export default function Component() {
           </div>
         </div>
 
-        {/* Enhanced Documents Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6 overflow-hidden">
-          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-              <h2 className="text-xl font-semibold flex items-center gap-2 text-gray-800 dark:text-white">
-                <FileText className="w-5 h-5 text-blue-500" /> Knowledge Base Documents
-                <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-1">
-                  ({documents.length} {documents.length === 1 ? 'document' : 'documents'})
-                </span>
-              </h2>
-              
-              {/* Search Bar */}
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="Search documents..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 w-full"
-                />
-              </div>
-            </div>
-            
-            {/* Document Categories */}
-            <div className="flex flex-wrap gap-2 mb-4">
-              {['All', 'Guidelines', 'Training', 'References', 'Policies'].map((category) => (
-                <button
-                  key={category}
-                  className={`px-3 py-1 text-sm rounded-full transition-colors ${
-                    selectedCategory === category
-                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300'
-                      : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
-                  }`}
-                  onClick={() => setSelectedCategory(category)}
-                >
-                  {category}
-                </button>
-              ))}
-            </div>
-          </div>
-          
-          {/* Document Grid */}
-          <div className="p-4">
-            {isDocumentsLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
-              </div>
-            ) : documentsError ? (
-              <div className="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-6 rounded-lg text-center">
-                <AlertCircle className="w-6 h-6 mx-auto mb-2" />
-                <p className="font-medium">Error loading documents</p>
-                <p className="text-sm mt-1">{documentsError}</p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="mt-3"
-                  onClick={fetchDocuments}
-                >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Try Again
-                </Button>
-              </div>
-            ) : filteredDocuments.length === 0 ? (
-              <div className="text-center py-12">
-                <FileText className="w-10 h-10 mx-auto text-gray-400 mb-3" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">No documents found</h3>
-                <p className="text-gray-500 dark:text-gray-400 mt-1">
-                  {searchQuery
-                    ? 'No documents match your search. Try different keywords.'
-                    : 'There are no documents in this category yet.'}
-                </p>
-                {searchQuery && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="mt-3"
-                    onClick={() => setSearchQuery('')}
-                  >
-                    Clear search
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-                  {currentDocuments.map((doc, idx) => (
-                    <div 
-                      key={doc.id || idx}
-                      className="group relative bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 transition-all duration-200 overflow-hidden hover:shadow-md"
-                    >
-                      <div className="p-5">
-                        <div className="flex items-start">
-                          <div className="bg-blue-50 dark:bg-blue-900/20 p-2.5 rounded-lg mr-4 flex-shrink-0">
-                            <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-medium text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 mb-1">
-                              {doc.title || doc.name || 'Untitled Document'}
-                            </h3>
-                            {doc.description && (
-                              <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 mb-2">
-                                {doc.description}
-                              </p>
-                            )}
-                            {doc.source && (
-                              <div className="flex items-center text-xs text-gray-500 dark:text-gray-400 mt-2">
-                                <span className="truncate">
-                                  <span className="font-medium">Source:</span> {doc.source}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="px-5 py-3 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          Updated {formatDistanceToNow(new Date(doc.updatedAt || doc.createdAt || Date.now()), { addSuffix: true })}
-                        </span>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
-                          onClick={() => handleDocumentClick(doc)}
-                        >
-                          View
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                
-                {/* Pagination */}
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 pt-4">
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      Showing <span className="font-medium">{(docCurrentPage - 1) * itemsPerPage + 1}</span> to{' '}
-                      <span className="font-medium">
-                        {Math.min(docCurrentPage * itemsPerPage, filteredDocuments.length)}
-                      </span>{' '}
-                      of <span className="font-medium">{filteredDocuments.length}</span> documents
-                    </div>
-                    <div className="flex space-x-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setDocCurrentPage(p => Math.max(1, p - 1))}
-                        disabled={docCurrentPage === 1}
-                        className="disabled:opacity-50"
-                      >
-                        Previous
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setDocCurrentPage(p => Math.min(totalPages, p + 1))}
-                        disabled={docCurrentPage === totalPages}
-                        className="disabled:opacity-50"
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
+
 
         {/* Chat Area */}
-        <div className="bg-[#ffffff] rounded-lg p-6 border border-[#e5e7eb] mb-6 min-h-[180px]">
+        <div className="bg-[#ffffff] rounded-lg p-6 border border-[#e5e7eb] mb-6 min-h-[180px] mx-4">
           {chatHistory.length === 0 && (
             <div className="flex items-start gap-3">
               <Avatar className="w-8 h-8 bg-[#fb2c36] text-[#ffffff]">
@@ -1286,17 +1067,16 @@ export default function Component() {
               </Avatar>
               <div className="flex-1">
                 <p className="text-[#101828] leading-relaxed">
-                  Hello Priya! 👋 I'm your friendly ECHO AI assistant, here to support you as a Community Health Officer.
-                  Think of me as your knowledgeable colleague who's always ready to help! 😊 I can help you with
-                  comprehensive TB training covering all 12 modules - from basic TB knowledge to advanced topics like
-                  DRTB, counselling, Nikshay system, and community engagement. Don't worry about asking "silly" questions
-                  - we're all here to learn together! What would you like to explore today?
+                  Hello! 👋 I'm your iECHO AI assistant, ready to help with your questions on TB management and agriculture.
+                  I can assist with TB topics like diagnosis, treatment, NTEP guidelines, Nikshay system, and patient counselling.
+                  I also provide guidance on agricultural practices, irrigation, crop management, and sustainable farming.
+                  Feel free to ask anything - I'm here to support your learning journey! What would you like to explore today?
                 </p>
               </div>
             </div>
           )}
           {/* Show chat messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto space-y-4">
             {chatHistory.map((message) => (
               <div key={message.id} className="relative">
                 <ChatMessage 
@@ -1328,7 +1108,7 @@ export default function Component() {
         </div>
 
         {/* Input Field */}
-        <div className="relative flex items-center">
+        <div className="relative flex items-center mx-4">
           <Button
             variant="ghost"
             size="icon"
