@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 from strands import Agent, tool
+from typing import AsyncGenerator
 
 app = FastAPI(title="iECHO RAG Chatbot API")
 
@@ -103,6 +104,7 @@ class ChatResponse(BaseModel):
     sessionId: str
     citations: List[Citation]
     userId: str
+    followUpQuestions: Optional[List[str]] = None
 
 # System prompts
 ORCHESTRATOR_PROMPT = """You are an intelligent assistant for the iECHO platform. Provide direct, concise, and helpful responses.
@@ -164,6 +166,8 @@ def filter_thinking_tags(text: str) -> str:
     text = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
     # Remove any remaining thinking tag fragments
     text = re.sub(r'</?thinking[^>]*>', '', text)
+    # Remove action calls that leak through
+    text = re.sub(r'Action: [^\n]*\n?', '', text)
     return text.strip()
 
 def query_knowledge_base(query: str, topic: str, conversation_history: List[str]) -> Dict:
@@ -274,6 +278,90 @@ def create_agent_tools(conversation_history: List[str] = None):
     
     return [route_to_tb_agent, route_to_agriculture_agent, search_general_knowledge], current_citations
 
+async def generate_follow_up_questions(response_text: str, original_query: str, conversation_history: List[str]) -> List[str]:
+    """Generate 2-3 contextual follow-up questions based on the response"""
+    try:
+        # Build context for follow-up generation
+        context = f"Original question: {original_query}\nResponse: {response_text}"
+        if conversation_history:
+            recent_context = "\n".join(conversation_history[-4:])
+            context += f"\nConversation history: {recent_context}"
+        
+        prompt = f"""Based on this conversation, generate exactly 3 relevant follow-up questions that a user might naturally ask next. 
+
+{context}
+
+Generate questions that:
+- Are directly related to the topic discussed
+- Help the user dive deeper into the subject
+- Are practical and actionable
+- Avoid repeating information already covered
+
+Format: Return only the questions, one per line, without numbers or bullets."""
+        
+        agent = Agent(
+            system_prompt="You are a helpful assistant that generates relevant follow-up questions. Be concise and practical.",
+            model="us.amazon.nova-lite-v1:0"
+        )
+        
+        full_response = ""
+        async for item in agent.stream_async(prompt):
+            if "data" in item:
+                chunk = item['data']
+                if '<thinking>' not in chunk and '</thinking>' not in chunk:
+                    full_response += chunk
+        
+        # Clean and parse questions
+        questions = []
+        lines = full_response.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('#') and '?' in line:
+                # Clean up the question
+                question = line.strip('- *123456789. ')
+                if question and len(question) > 10:
+                    questions.append(question)
+        
+        # Return exactly 3 questions, pad if needed
+        if len(questions) < 3:
+            domain_questions = {
+                'tb': [
+                    "What are the treatment protocols for this condition?",
+                    "How can I prevent transmission?",
+                    "What are the diagnostic procedures?"
+                ],
+                'agriculture': [
+                    "What are the best practices for this technique?",
+                    "How can I implement this on my farm?",
+                    "What are the cost considerations?"
+                ]
+            }
+            
+            # Determine domain based on response content
+            domain = 'tb' if any(word in response_text.lower() for word in ['tb', 'tuberculosis', 'ntep', 'nikshay']) else 'agriculture'
+            fallback_questions = domain_questions.get(domain, domain_questions['tb'])
+            
+            while len(questions) < 3 and fallback_questions:
+                questions.append(fallback_questions.pop(0))
+        
+        return questions[:3]  # Return exactly 3 questions
+        
+    except Exception as e:
+        logger.error(f"Error generating follow-up questions: {str(e)}")
+        # Return default questions based on context
+        if 'tb' in original_query.lower() or 'tuberculosis' in original_query.lower():
+            return [
+                "What are the next steps in TB management?",
+                "How can I improve patient outcomes?",
+                "What resources are available for TB care?"
+            ]
+        else:
+            return [
+                "How can I implement this effectively?",
+                "What are the best practices to follow?",
+                "Where can I find more information?"
+            ]
+
 async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     """Run the main orchestration agent with streaming response"""
     # Clean old sessions (older than 1 hour)
@@ -358,13 +446,17 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     log_to_cloudwatch(log_message)
     print(f"Chat complete - User: {user_id}, Session: {session_id}, Response: {response_id}, Query: {query}, Response: {full_response[:200]}...")
     
-    # Send final response with citations
+    # Generate follow-up questions
+    follow_up_questions = await generate_follow_up_questions(full_response, enhanced_query, conversation_history)
+    
+    # Send final response with citations and follow-up questions
     yield json.dumps({
         "response": full_response,
         "citations": current_citations,
         "sessionId": session_id,
         "responseId": response_id,
-        "userId": user_id
+        "userId": user_id,
+        "followUpQuestions": follow_up_questions
     }) + "\n"
 
 @app.get('/health')
@@ -410,6 +502,9 @@ async def chat(request: ChatRequest):
         response_text = filter_thinking_tags(full_response)
         citations = current_citations
         
+        # Generate follow-up questions for non-streaming endpoint too
+        follow_up_questions = await generate_follow_up_questions(response_text, request.query, [])
+        
         # Log
         log_message = f"Chat complete - User: {request.userId}, Session: {session_id}, Response: {response_id}, Query: {request.query}, Response: {response_text}"
         logger.info(log_message)
@@ -420,7 +515,8 @@ async def chat(request: ChatRequest):
             "citations": citations,
             "sessionId": session_id,
             "responseId": response_id,
-            "userId": request.userId
+            "userId": request.userId,
+            "followUpQuestions": follow_up_questions
         }
         
     except Exception as e:

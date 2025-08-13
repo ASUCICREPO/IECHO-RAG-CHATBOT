@@ -13,6 +13,7 @@ import {
   Globe, 
   Heart, 
   Home, 
+  Lightbulb,
   MessageSquare, 
   Mic, 
   MoreVertical, 
@@ -53,6 +54,7 @@ interface ChatResponse {
   sessionId: string;
   responseId: string;
   userId: string;
+  followUpQuestions?: string[];
 }
 
 interface ChatMessage {
@@ -62,6 +64,7 @@ interface ChatMessage {
   responseId?: string;
   citations?: Citation[];
   error?: boolean;
+  followUpQuestions?: string[];
 }
 
 function CitationList({ citations }: { citations: Citation[] }) {
@@ -137,7 +140,11 @@ function CitationList({ citations }: { citations: Citation[] }) {
   );
 }
 
-function ChatMessage({ message, onRate }: { message: ChatMessage, onRate: () => void }) {
+function ChatMessage({ message, onRate, onFollowUpClick }: { 
+  message: ChatMessage, 
+  onRate: () => void,
+  onFollowUpClick?: (question: string) => void 
+}) {
   return (
     <>
       <div className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-4 items-start gap-3`}>
@@ -197,6 +204,28 @@ function ChatMessage({ message, onRate }: { message: ChatMessage, onRate: () => 
         </Avatar>
       )}
       </div>
+      
+      {/* Follow-up Questions - Only show for the latest AI message */}
+      {message.sender === 'ai' && message.followUpQuestions && message.followUpQuestions.length > 0 && onFollowUpClick && (
+        <div className="max-w-[80%] ml-11 mb-4 space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Lightbulb className="w-4 h-4 text-blue-600" />
+            <span className="text-blue-600 font-medium text-sm">Follow-up questions:</span>
+          </div>
+          <div className="space-y-2">
+            {message.followUpQuestions.map((question, index) => (
+              <button
+                key={index}
+                className="w-full text-left p-1.5 sm:p-2 bg-white border border-blue-200 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors duration-200 flex items-start gap-2"
+                onClick={() => onFollowUpClick(question)}
+              >
+                <ArrowRight className="w-3 h-3 sm:w-4 sm:h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                <span className="text-xs sm:text-sm leading-tight break-all">{question}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       
       {/* Feedback Button - Below the message box */}
       {message.sender === 'ai' && message.responseId && (
@@ -286,6 +315,7 @@ export default function Component() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showQuickStart, setShowQuickStart] = useState(true);
+  const [currentFollowUps, setCurrentFollowUps] = useState<string[]>([]);
   
   // Auto-scroll to bottom when new messages arrive or during streaming
   useEffect(() => {
@@ -446,6 +476,12 @@ export default function Component() {
     setIsChatLoading(true);
     setChatError(null);
     
+    // Clear follow-up questions when user starts typing a new message
+    setCurrentFollowUps([]);
+    
+    // Hide quick start when user sends a message
+    setShowQuickStart(false);
+    
     const userMessage = textToSend;
     const userMessageId = `user-${Date.now()}`;
     
@@ -535,13 +571,20 @@ export default function Component() {
 
       if (finalData) {
         setLatestResponseId(finalData.responseId);
+        
+        // Update current follow-ups
+        if (finalData.followUpQuestions && finalData.followUpQuestions.length > 0) {
+          setCurrentFollowUps(finalData.followUpQuestions);
+        }
+        
         setChatHistory(prev => prev.map(msg => 
           msg.id === aiMessageId 
             ? { 
                 ...msg, 
                 text: finalData.response,
                 responseId: finalData.responseId,
-                citations: finalData.citations || []
+                citations: finalData.citations || [],
+                followUpQuestions: finalData.followUpQuestions || []
               }
             : msg
         ));
@@ -565,6 +608,13 @@ export default function Component() {
       setIsChatLoading(false);
     }
   }
+
+  const handleFollowUpClick = (question: string) => {
+    // Clear current follow-ups when a follow-up is clicked
+    setCurrentFollowUps([]);
+    // Send the follow-up question
+    handleSend(question);
+  };
 
 
 
@@ -1036,20 +1086,17 @@ export default function Component() {
               <h2 className="text-sm sm:text-xl font-semibold text-gray-800 dark:text-white mb-1">Quick Start</h2>
               <div className="grid md:grid-cols-2 gap-1 sm:gap-2">
                 {questionCards.map((question, index) => (
-                  <Button
+                  <button
                     key={index}
-                    variant="outline"
-                    className="justify-start text-left h-auto p-2 sm:p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-normal rounded-lg transition-colors duration-200"
+                    className="w-full justify-start text-left h-auto p-2 sm:p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-normal rounded-lg transition-colors duration-200 flex items-start gap-2"
                     onClick={() => {
                       setShowQuickStart(false);
                       handleSend(question);
                     }}
                   >
-                    <div className="flex items-start gap-2">
-                      <MessageSquare className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
-                      <span className="text-xs sm:text-sm leading-relaxed break-words">{question}</span>
-                    </div>
-                  </Button>
+                    <MessageSquare className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
+                    <span className="text-xs sm:text-sm leading-relaxed break-all">{question}</span>
+                  </button>
                 ))}
               </div>
             </div>
@@ -1057,17 +1104,28 @@ export default function Component() {
 
           {/* Show chat messages */}
           <div className="flex-1 overflow-y-auto space-y-4 pb-16">
-            {chatHistory.map((message) => (
-              <div key={message.id} className="relative">
-                <ChatMessage 
-                  message={message} 
-                  onRate={() => {
-                    setSelectedMessageId(message.id);
-                    setShowRatingDialog(true);
-                  }} 
-                />
-              </div>
-            ))}
+            {chatHistory.map((message, index) => {
+              // Only show follow-up questions for the latest AI message
+              const isLatestAiMessage = message.sender === 'ai' && 
+                index === chatHistory.length - 1 && 
+                !isChatLoading;
+              
+              return (
+                <div key={message.id} className="relative">
+                  <ChatMessage 
+                    message={{
+                      ...message,
+                      followUpQuestions: isLatestAiMessage ? message.followUpQuestions : undefined
+                    }} 
+                    onRate={() => {
+                      setSelectedMessageId(message.id);
+                      setShowRatingDialog(true);
+                    }}
+                    onFollowUpClick={isLatestAiMessage ? handleFollowUpClick : undefined}
+                  />
+                </div>
+              );
+            })}
             {isChatLoading && (
               <div className="flex justify-start">
                 <div className="bg-gray-100 p-3 rounded-lg max-w-[80%]">
@@ -1095,7 +1153,13 @@ export default function Component() {
               <div className="relative flex-1">
                 <Input
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    // Clear follow-ups when user starts typing
+                    if (e.target.value.trim() && currentFollowUps.length > 0) {
+                      setCurrentFollowUps([]);
+                    }
+                  }}
                   placeholder="Type your query here..."
                   className="w-full px-4 py-3 text-xs sm:text-base bg-gray-200 border-gray-300 text-gray-800 placeholder-gray-500 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                   onKeyDown={(e) => {
