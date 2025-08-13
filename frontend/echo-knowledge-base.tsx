@@ -903,14 +903,6 @@ export default function Component() {
               <Star className="w-5 h-5 text-yellow-300 fill-yellow-300" />
               Rate This Response
             </DialogTitle>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="text-white/80 hover:bg-white/10 rounded-full h-8 w-8"
-              onClick={() => setShowRatingDialog(false)}
-            >
-              <X className="w-4 h-4" />
-            </Button>
           </div>
           <p className="text-blue-100 text-sm">Your feedback helps us improve our responses</p>
         </div>
