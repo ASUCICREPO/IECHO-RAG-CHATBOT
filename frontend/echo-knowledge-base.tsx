@@ -1030,12 +1030,28 @@ export default function Component() {
       <header className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
-            <div className="flex items-center">
+            <div className="flex items-center gap-3">
               <img
                 src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-QuV3bpvNh9r2l0UYMmNrFvG1GotwpE.png"
                 alt="ECHO India Project ECHO logo"
                 className="h-10 w-auto"
               />
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => {
+                  setChatHistory([]);
+                  setQuery('');
+                  setShowQuickStart(true);
+                  setCurrentFollowUps([]);
+                  setChatError(null);
+                  setLatestResponseId(null);
+                }}
+                className="text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                title="Reset to home"
+              >
+                <Home className="w-5 h-5" />
+              </Button>
             </div>
             <div className="flex items-center space-x-4">
               <DropdownMenu>
