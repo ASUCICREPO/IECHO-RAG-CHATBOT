@@ -566,6 +566,11 @@ async def submit_feedback(request: FeedbackRequest):
         
         table.put_item(Item=feedback_item)
         
+        # Log feedback to CloudWatch
+        log_message = f"Feedback submitted - User: {request.userId}, Response: {request.responseId}, Rating: {request.rating}, Feedback: {request.feedback or 'None'}, FeedbackId: {feedback_item['feedbackId']}"
+        logger.info(log_message)
+        log_to_cloudwatch(log_message)
+        
         return {
             "message": "Feedback submitted successfully",
             "feedbackId": feedback_item['feedbackId']
