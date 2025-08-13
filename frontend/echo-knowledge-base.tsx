@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import session from './utils/session'
 const { getOrCreateSessionId } = session;
 import { Button } from "@/components/ui/button"
@@ -10,34 +10,29 @@ import {
   AlertCircle,
   ArrowRight, 
   ChevronDown, 
-  FileText, 
   Globe, 
   Heart, 
   Home, 
   MessageSquare, 
   Mic, 
   MoreVertical, 
-  RefreshCw, 
-  Search,
+  RefreshCw,
   Send, 
   Star, 
   X 
 } from "lucide-react";
-import { formatDistanceToNow } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Badge } from "@/components/ui/badge"
+
 
 const questionCards = [
   "What causes TB - bacterial, viral or both?",
-  "What is the full form of DOTS?",
-  "When was RNTCP renamed to NTEP?",
+  "What are the main symptoms of pulmonary TB?",
   "What is Ni-Kshay used for?",
-  "DRTB categories and treatment",
-  "CHO counselling role",
-  "DBT benefits for TB patients",
-  "Nikshay platform features",
+  "How to improve crop irrigation efficiency?",
+  "What are sustainable farming practices?",
+  "What is crop rotation?",
 ]
 
 interface Citation {
@@ -78,19 +73,62 @@ function CitationList({ citations }: { citations: Citation[] }) {
     <div className="mt-2 text-sm">
       <button 
         onClick={() => setExpanded(!expanded)}
-        className="text-blue-600 hover:underline flex items-center gap-1 text-xs"
+        className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-xs"
       >
         {expanded ? 'Hide sources' : `Show sources (${citations.length})`}
         <ChevronDown className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
       
       {expanded && (
-        <div className="mt-2 space-y-2 pl-4 border-l-2 border-gray-200">
+        <div className="mt-2 space-y-1.5">
           {citations.map((cite, i) => (
-            <div key={i} className="p-2 bg-gray-50 rounded text-xs">
-              <div className="font-medium">{cite.title}</div>
-              <div className="text-gray-500 text-xs">{cite.source}</div>
-              <p className="text-xs mt-1 text-gray-700">{cite.excerpt}</p>
+            <div key={i} className="p-2 bg-gray-50 border border-gray-200 rounded text-xs">
+              <div className="font-medium text-gray-800 mb-1">
+                {cite.title.replace(/^#+\s*/, '').replace(/##\s*/g, ' - ')}
+              </div>
+              <div className="mb-1">
+                {cite.source.startsWith('s3://') ? (
+                  <button 
+                    onClick={async () => {
+                      try {
+                        const encodedPath = encodeURIComponent(cite.source);
+                        const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/document-url/${encodedPath}`);
+                        if (!response.ok) {
+                          throw new Error(`HTTP ${response.status}`);
+                        }
+                        const data = await response.json();
+                        if (data.url) {
+                          window.open(data.url, '_blank');
+                        } else {
+                          alert('Document URL not available');
+                        }
+                      } catch (error) {
+                        console.error('Failed to get document URL:', error);
+                        alert('Failed to open document');
+                      }
+                    }}
+                    className="text-left text-blue-700 hover:text-blue-900 hover:bg-blue-100 px-1 py-0.5 rounded transition-colors text-xs font-medium break-words"
+                  >
+                    📄 {cite.source.split('/').pop()?.replace('.pdf', '') || cite.source}
+                  </button>
+                ) : (
+                  <span className="text-gray-600 text-xs break-words">
+                    📄 {cite.source}
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-gray-600 leading-relaxed">
+                {(() => {
+                  const cleanExcerpt = cite.excerpt
+                    .replace(/^#+\s*/gm, '')
+                    .replace(/\*\*(.*?)\*\*/g, '$1')
+                    .replace(/\*(.*?)\*/g, '$1')
+                    .replace(/##\s*/g, ' - ')
+                    .trim();
+                  return cleanExcerpt.length > 200 ? cleanExcerpt.substring(0, 200) + '...' : cleanExcerpt;
+                })()
+                }
+              </div>
             </div>
           ))}
         </div>
@@ -101,13 +139,46 @@ function CitationList({ citations }: { citations: Citation[] }) {
 
 function ChatMessage({ message, onRate }: { message: ChatMessage, onRate: () => void }) {
   return (
-    <div className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div className={`max-w-[80%] p-3 rounded-lg ${
+    <>
+      <div className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-4 items-start gap-3`}>
+      {/* Chatbot Avatar - Left side */}
+      {message.sender === 'ai' && (
+        <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
+          <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
+        </Avatar>
+      )}
+      
+      <div className={`max-w-[80%] p-2 sm:p-3 rounded-lg ${
         message.sender === 'user' 
           ? 'bg-blue-600 text-white' 
-          : 'bg-gray-100 text-gray-800'
+          : 'bg-white text-gray-800 border border-gray-200'
       }`}>
-        <div className="whitespace-pre-wrap">{message.text}</div>
+        <div className="whitespace-pre-wrap text-xs sm:text-base">
+          {message.sender === 'ai' ? (
+            <div dangerouslySetInnerHTML={{
+              __html: message.text
+                // Headers
+                .replace(/^### (.*$)/gm, '<h3 class="text-sm sm:text-lg font-semibold mt-2 sm:mt-3 mb-1 sm:mb-2">$1</h3>')
+                .replace(/^## (.*$)/gm, '<h2 class="text-base sm:text-xl font-semibold mt-2 sm:mt-4 mb-1 sm:mb-2">$1</h2>')
+                .replace(/^# (.*$)/gm, '<h1 class="text-lg sm:text-2xl font-bold mt-2 sm:mt-4 mb-2 sm:mb-3">$1</h1>')
+                // Bold and italic
+                .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+                // Code
+                .replace(/`(.*?)`/g, '<code class="bg-gray-200 px-1 rounded text-xs sm:text-sm font-mono">$1</code>')
+                // Lists
+                .replace(/^\* (.*$)/gm, '<li class="ml-3 sm:ml-4 list-disc">$1</li>')
+                .replace(/^- (.*$)/gm, '<li class="ml-3 sm:ml-4 list-disc">$1</li>')
+                .replace(/^\d+\. (.*$)/gm, '<li class="ml-3 sm:ml-4 list-decimal">$1</li>')
+                // Links
+                .replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" class="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">$1</a>')
+                // Line breaks
+                .replace(/\n/g, '<br>')
+            }} />
+          ) : (
+            message.text
+          )}
+        </div>
         
         {/* Citations */}
         {message.sender === 'ai' && message.citations && message.citations.length > 0 && (
@@ -116,22 +187,34 @@ function ChatMessage({ message, onRate }: { message: ChatMessage, onRate: () => 
           </div>
         )}
         
-        {/* Feedback Button */}
-        {message.sender === 'ai' && message.responseId && (
+
+      </div>
+      
+      {/* User Avatar - Right side */}
+      {message.sender === 'user' && (
+        <Avatar className="w-8 h-8 bg-blue-600 text-white flex-shrink-0">
+          <AvatarFallback className="bg-blue-600 text-white font-bold">U</AvatarFallback>
+        </Avatar>
+      )}
+      </div>
+      
+      {/* Feedback Button - Below the message box */}
+      {message.sender === 'ai' && message.responseId && (
+        <div className="flex justify-start ml-11 -mt-2">
           <button 
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
               onRate();
             }}
-            className="mt-2 text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+            className="text-xs text-yellow-400 hover:text-yellow-500 flex items-center gap-1 font-medium"
           >
-            <Star className="w-3 h-3" />
+            <Star className="w-3 h-3" strokeWidth={2.5} />
             Rate this response
           </button>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -199,7 +282,40 @@ export default function Component() {
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<string>("EN");
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [showQuickStart, setShowQuickStart] = useState(true);
   
+  // Auto-scroll to bottom when new messages arrive or during streaming
+  useEffect(() => {
+    if (autoScroll && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatHistory, autoScroll]);
+
+  // Handle scroll events to detect user interruption
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+      setAutoScroll(isAtBottom);
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Re-enable auto-scroll when streaming starts
+  useEffect(() => {
+    if (isChatLoading) {
+      setAutoScroll(true);
+    }
+  }, [isChatLoading]);
+
   // Check API health on component mount and periodically
   useEffect(() => {
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -323,13 +439,14 @@ export default function Component() {
     }
   };
 
-  const handleSend = async () => {
-    if (!query.trim() || isChatLoading) return;
+  const handleSend = async (messageText?: string) => {
+    const textToSend = messageText || query.trim();
+    if (!textToSend || isChatLoading) return;
     
     setIsChatLoading(true);
     setChatError(null);
     
-    const userMessage = query.trim();
+    const userMessage = textToSend;
     const userMessageId = `user-${Date.now()}`;
     
     // Add user message to history
@@ -339,22 +456,21 @@ export default function Component() {
       text: userMessage 
     }]);
     
-    setQuery("");
+    if (!messageText) setQuery("");
 
     try {
       // Create a controller for the fetch request to support timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/chat`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/chat-stream`, {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
           query: userMessage, 
-          userId: 'api-user', // TODO: Replace with actual user ID when auth is implemented
+          userId: 'api-user',
           sessionId: getOrCreateSessionId()
         }),
         signal: controller.signal
@@ -363,28 +479,73 @@ export default function Component() {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errorData: ApiError = await response.json().catch(() => ({
-          detail: response.statusText || 'Unknown error occurred'
-        }));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      const data: ChatResponse = await response.json();
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamedText = '';
+      let finalData: ChatResponse | null = null;
+      const aiMessageId = `ai-${Date.now()}`;
       
-      if (!data.responseId || !data.response) {
-        throw new Error('Invalid response format from server');
-      }
-      
-      setLatestResponseId(data.responseId);
-      
-      // Add AI response to history with responseId and citations
+      // Add placeholder AI message
       setChatHistory(prev => [...prev, { 
-        id: data.responseId,
+        id: aiMessageId,
         sender: 'ai', 
-        text: data.response,
-        responseId: data.responseId,
-        citations: data.citations || []
+        text: '',
+        citations: []
       }]);
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const data = JSON.parse(line);
+                
+                if (data.type === 'content' && data.data) {
+                  streamedText += data.data;
+                  setChatHistory(prev => prev.map(msg => 
+                    msg.id === aiMessageId 
+                      ? { ...msg, text: streamedText }
+                      : msg
+                  ));
+                  // Add delay to slow down streaming effect
+                  await new Promise(resolve => setTimeout(resolve, 30));
+                } else if (data.response && data.citations !== undefined) {
+                  finalData = data;
+                }
+              } catch (parseError) {
+                console.warn('Parse error:', parseError);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      if (finalData) {
+        setLatestResponseId(finalData.responseId);
+        setChatHistory(prev => prev.map(msg => 
+          msg.id === aiMessageId 
+            ? { 
+                ...msg, 
+                text: finalData.response,
+                responseId: finalData.responseId,
+                citations: finalData.citations || []
+              }
+            : msg
+        ));
+      }
 
     } catch (error) {
       console.error('Chat error:', error);
@@ -405,143 +566,9 @@ export default function Component() {
     }
   }
 
-  // Documents state with proper typing
-  const [documents, setDocuments] = useState<Array<{
-    id: string;
-    title?: string;
-    name?: string;
-    description?: string;
-    source?: string;
-    updatedAt?: string | Date;
-    createdAt?: string | Date;
-    category?: string;
-  }>>([]);
-  
-  const [isDocumentsLoading, setIsDocumentsLoading] = useState(false);
-  const [documentsError, setDocumentsError] = useState<string | null>(null);
-  
-  // Search and filter state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  
-  // Document pagination state
-  const [docCurrentPage, setDocCurrentPage] = useState(1);
-  const itemsPerPage = 6; // Show 6 items per page
-  
-  // Filter documents based on search query and selected category
-  const filteredDocuments = useMemo(() => {
-    return documents.filter(doc => {
-      const matchesSearch = searchQuery === '' || 
-        (doc.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-         doc.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-         doc.source?.toLowerCase().includes(searchQuery.toLowerCase()));
-      
-      const matchesCategory = selectedCategory === 'All' || 
-        doc.category === selectedCategory;
-      
-      return matchesSearch && matchesCategory;
-    });
-  }, [documents, searchQuery, selectedCategory]);
-  
-  // Calculate pagination
-  const totalPages = Math.ceil(filteredDocuments.length / itemsPerPage);
-  const currentDocuments = useMemo(() => {
-    const startIndex = (docCurrentPage - 1) * itemsPerPage;
-    return filteredDocuments.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredDocuments, docCurrentPage]);
-  
-  // Reset to first page when filters change
-  useEffect(() => {
-    setDocCurrentPage(1);
-  }, [searchQuery, selectedCategory]);
-  
-  // Handle document click
-  const handleDocumentClick = (doc: any) => {
-    // For now, just log the click. Can be extended to open a preview/modal
-    console.log('Document clicked:', doc);
-  };
 
-  // Fetch documents from API
-  const fetchDocuments = async () => {
-    setIsDocumentsLoading(true);
-    setDocumentsError(null);
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/documents`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch documents');
-      }
-      const data = await response.json();
-      
-      // Normalize document data to ensure consistent structure
-      const normalizedDocuments = Array.isArray(data) ? data.map(doc => ({
-        id: doc.id || '',
-        title: doc.title || doc.name || 'Untitled Document',
-        description: doc.description || 'No description available',
-        source: doc.source || 'Unknown source',
-        updatedAt: doc.updatedAt || new Date().toISOString(),
-        createdAt: doc.createdAt || new Date().toISOString(),
-        category: doc.category || 'Uncategorized'
-      })) : [];
-      
-      setDocuments(normalizedDocuments);
-    } catch (error) {
-      console.error('Error fetching documents:', error);
-      setDocumentsError('Failed to load documents. Please try again later.');
-    } finally {
-      setIsDocumentsLoading(false);
-    }
-  };
 
-  // Fetch status and documents on mount
-  useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/status`);
-        if (!res.ok) throw new Error('API error');
-        const data = await res.json();
-        setApiStatus('online');
-      } catch (e) {
-        setApiStatus('error');
-      }
-    };
 
-    const fetchDocuments = async () => {
-      setIsDocumentsLoading(true);
-      setDocumentsError(null);
-      try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/documents`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        
-        // Normalize the response to ensure we always have an array of documents
-        const documents = Array.isArray(data.documents) ? data.documents : 
-                         Array.isArray(data) ? data : [];
-        
-        // Add default values for required fields
-        const normalizedDocs = documents.map((doc: any) => ({
-          id: doc.id || Math.random().toString(36).substr(2, 9),
-          title: doc.title || doc.name || 'Untitled Document',
-          description: doc.description || '',
-          source: doc.source || 'Unknown Source',
-          updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
-          createdAt: doc.createdAt || new Date().toISOString(),
-          category: doc.category || 'Uncategorized'
-        }));
-        
-        setDocuments(normalizedDocs);
-      } catch (error) {
-        console.error('Error fetching documents:', error);
-        setDocumentsError(error instanceof Error ? error.message : 'Failed to load documents');
-      } finally {
-        setIsDocumentsLoading(false);
-      }
-    };
-
-    fetchStatus();
-    fetchDocuments();
-  }, []);
 
   // Health check function 
   const fetchHealth = async () => {
@@ -595,61 +622,19 @@ export default function Component() {
                 </Button>
               </div>
               <div className="flex items-center space-x-4">
-                <div className="flex items-center">
-                  <ApiStatusIndicator status={apiStatus} />
-                </div>
-                <Button 
-                  size="icon" 
-                  variant="outline" 
-                  onClick={fetchHealth} 
-                  title="Retry health check"
-                  className="ml-1"
-                >
-                  <svg 
-                    width="16" 
-                    height="16" 
-                    fill="none" 
-                    viewBox="0 0 24 24"
-                    className="w-4 h-4"
-                  >
-                    <path 
-                      d="M2 12a10 10 0 1 1 10 10" 
-                      stroke="currentColor" 
-                      strokeWidth="2" 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round"
-                    />
-                    <polyline 
-                      points="2 16 2 12 6 12" 
-                      stroke="currentColor" 
-                      strokeWidth="2" 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="outline"
-                      className="bg-[#000000] text-[#ffffff] border-[#000000] hover:bg-[#101828] rounded-full px-4 py-2 h-auto"
+                      className="bg-[#000000] text-[#ffffff] border-[#000000] hover:bg-[#101828] rounded-lg px-3 py-1.5 h-auto"
                     >
-                      <Globe className="w-4 h-4 mr-2" />
+                      <Globe className="w-4 h-4 mr-1" />
                       {selectedLanguage}
-                      <ChevronDown className="w-4 h-4 ml-2" />
+                      <ChevronDown className="w-4 h-4 ml-1" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="bg-white border border-[#e5e7eb] rounded-md shadow-lg">
+                  <DropdownMenuContent align="end" className="bg-white border border-[#e5e7eb] rounded-lg shadow-lg">
                     <DropdownMenuItem onClick={() => setSelectedLanguage("EN")}>English (EN)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedLanguage("HI")}>Hindi (HI)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedLanguage("BN")}>Bengali (BN)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedLanguage("TA")}>Tamil (TA)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedLanguage("TE")}>Telugu (TE)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedLanguage("MR")}>Marathi (MR)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedLanguage("ES")}>Spanish (ES)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedLanguage("FR")}>French (FR)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedLanguage("DE")}>German (DE)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedLanguage("ZH")}>Chinese (ZH)</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Button variant="ghost" size="icon">
@@ -975,24 +960,7 @@ export default function Component() {
           )}
         </div>
         
-        {/* Status Bar */}
-        <div className="bg-gray-50 px-6 py-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
-          <div className="flex items-center gap-1.5">
-            <div className={`w-2 h-2 rounded-full ${
-              apiStatus === 'online' ? 'bg-green-500' : 
-              apiStatus === 'offline' || apiStatus === 'error' ? 'bg-red-500' : 'bg-yellow-500'
-            }`}></div>
-            <span>Service Status: {apiStatus === 'online' ? 'Operational' : 'Issues Detected'}</span>
-          </div>
-          <button 
-            onClick={fetchHealth}
-            className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
-            disabled={apiStatus === 'loading'}
-          >
-            <RefreshCw className={`w-3 h-3 ${apiStatus === 'loading' ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
+
       </DialogContent>
     </Dialog>
   );
@@ -1014,7 +982,7 @@ export default function Component() {
 
   // Home page
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
       {ratingDialog}
       {confirmationDialog}
       <header className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-10">
@@ -1028,41 +996,19 @@ export default function Component() {
               />
             </div>
             <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <ApiStatusIndicator status={apiStatus} />
-                <Button 
-                  variant="outline" 
-                  size="icon" 
-                  onClick={fetchHealth} 
-                  title="Refresh status"
-                  className="h-8 w-8"
-                  disabled={apiStatus === 'loading'}
-                >
-                  <RefreshCw className={`h-4 w-4 ${apiStatus === 'loading' ? 'animate-spin' : ''}`} />
-                </Button>
-              </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="outline"
-                    className="bg-[#000000] text-[#ffffff] border-[#000000] hover:bg-[#101828] rounded-full px-4 py-2 h-auto"
+                    className="bg-[#000000] text-[#ffffff] border-[#000000] hover:bg-white hover:text-black hover:border-gray-300 rounded-lg px-3 py-1.5 h-auto transition-colors"
                   >
-                    <Globe className="w-4 h-4 mr-2" />
+                    <Globe className="w-4 h-4 mr-1" />
                     {selectedLanguage}
-                    <ChevronDown className="w-4 h-4 ml-2" />
+                    <ChevronDown className="w-4 h-4 ml-1" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="bg-white border border-[#e5e7eb] rounded-md shadow-lg">
+                <DropdownMenuContent align="end" className="bg-white border border-[#e5e7eb] rounded-lg shadow-lg">
                   <DropdownMenuItem onClick={() => setSelectedLanguage("EN")}>English (EN)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage("HI")}>Hindi (HI)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage("BN")}>Bengali (BN)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage("TA")}>Tamil (TA)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage("TE")}>Telugu (TE)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage("MR")}>Marathi (MR)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage("ES")}>Spanish (ES)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage("FR")}>French (FR)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage("DE")}>German (DE)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage("ZH")}>Chinese (ZH)</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -1070,233 +1016,47 @@ export default function Component() {
         </div>
       </header>
 
-      <main className="flex-1 bg-gray-50 dark:bg-gray-900 py-8">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 mb-8">
-            <h1 className="text-3xl font-bold text-[#101828] dark:text-white mb-3">Welcome to your knowledge</h1>
-            <p className="text-[#4a5565] dark:text-gray-300 text-lg mb-4">Ask me anything about NTEP guidelines, TB management, or related topics.</p>
-            <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-              <span>API Status:</span>
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                apiStatus === 'online' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                apiStatus === 'offline' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
-                'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-              }`}>
-                {apiStatus === 'online' ? 'Online' : apiStatus === 'offline' ? 'Offline' : 'Checking...'}
-              </span>
+      <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-2 sm:py-4 overflow-y-auto pb-32">
+        {/* Chat Area */}
+        <div className="p-3 sm:p-6 mx-2 sm:mx-4">
+          {/* Banner positioned like chat messages */}
+          <div className="flex items-start gap-3 mb-4">
+            <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
+              <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
+            </Avatar>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-2 sm:p-3 flex-1">
+              <h1 className="text-sm sm:text-lg font-bold text-[#101828] dark:text-white mb-1 sm:mb-2">iECHO AI Assistant</h1>
+              <p className="text-xs sm:text-base text-[#4a5565] dark:text-gray-300">Hello! 👋 I'm your iECHO AI assistant, ready to help with TB management and agriculture questions. I can educate you about TB treatment, NTEP guidelines, Nikshay system, and sustainable farming practices.</p>
             </div>
           </div>
 
           {/* Question Cards */}
-          <div className="grid gap-4 mb-8">
-            <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">Quick Start</h2>
-            <div className="grid md:grid-cols-2 gap-4">
-              {questionCards.map((question, index) => (
-                <Button
-                  key={index}
-                  variant="outline"
-                  className="justify-start text-left h-auto p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-normal rounded-lg transition-colors duration-200"
-                  onClick={() => handleQuestionClick(question)}
-                >
-                  <div className="flex items-center">
-                    <MessageSquare className="h-4 w-4 mr-2 text-blue-500" />
-                    <span>{question}</span>
-                  </div>
-                </Button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Enhanced Documents Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6 overflow-hidden">
-          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-              <h2 className="text-xl font-semibold flex items-center gap-2 text-gray-800 dark:text-white">
-                <FileText className="w-5 h-5 text-blue-500" /> Knowledge Base Documents
-                <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-1">
-                  ({documents.length} {documents.length === 1 ? 'document' : 'documents'})
-                </span>
-              </h2>
-              
-              {/* Search Bar */}
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="Search documents..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 w-full"
-                />
-              </div>
-            </div>
-            
-            {/* Document Categories */}
-            <div className="flex flex-wrap gap-2 mb-4">
-              {['All', 'Guidelines', 'Training', 'References', 'Policies'].map((category) => (
-                <button
-                  key={category}
-                  className={`px-3 py-1 text-sm rounded-full transition-colors ${
-                    selectedCategory === category
-                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300'
-                      : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
-                  }`}
-                  onClick={() => setSelectedCategory(category)}
-                >
-                  {category}
-                </button>
-              ))}
-            </div>
-          </div>
-          
-          {/* Document Grid */}
-          <div className="p-4">
-            {isDocumentsLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
-              </div>
-            ) : documentsError ? (
-              <div className="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-6 rounded-lg text-center">
-                <AlertCircle className="w-6 h-6 mx-auto mb-2" />
-                <p className="font-medium">Error loading documents</p>
-                <p className="text-sm mt-1">{documentsError}</p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="mt-3"
-                  onClick={fetchDocuments}
-                >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Try Again
-                </Button>
-              </div>
-            ) : filteredDocuments.length === 0 ? (
-              <div className="text-center py-12">
-                <FileText className="w-10 h-10 mx-auto text-gray-400 mb-3" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">No documents found</h3>
-                <p className="text-gray-500 dark:text-gray-400 mt-1">
-                  {searchQuery
-                    ? 'No documents match your search. Try different keywords.'
-                    : 'There are no documents in this category yet.'}
-                </p>
-                {searchQuery && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="mt-3"
-                    onClick={() => setSearchQuery('')}
+          {showQuickStart && (
+            <div className="ml-11 mr-11 grid gap-1 sm:gap-2 mb-4">
+              <h2 className="text-sm sm:text-xl font-semibold text-gray-800 dark:text-white mb-1">Quick Start</h2>
+              <div className="grid md:grid-cols-2 gap-1 sm:gap-2">
+                {questionCards.map((question, index) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    className="justify-start text-left h-auto p-2 sm:p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-normal rounded-lg transition-colors duration-200"
+                    onClick={() => {
+                      setShowQuickStart(false);
+                      handleSend(question);
+                    }}
                   >
-                    Clear search
+                    <div className="flex items-start gap-2">
+                      <MessageSquare className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
+                      <span className="text-xs sm:text-sm leading-relaxed break-words">{question}</span>
+                    </div>
                   </Button>
-                )}
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-                  {currentDocuments.map((doc, idx) => (
-                    <div 
-                      key={doc.id || idx}
-                      className="group relative bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 transition-all duration-200 overflow-hidden hover:shadow-md"
-                    >
-                      <div className="p-5">
-                        <div className="flex items-start">
-                          <div className="bg-blue-50 dark:bg-blue-900/20 p-2.5 rounded-lg mr-4 flex-shrink-0">
-                            <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-medium text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 mb-1">
-                              {doc.title || doc.name || 'Untitled Document'}
-                            </h3>
-                            {doc.description && (
-                              <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 mb-2">
-                                {doc.description}
-                              </p>
-                            )}
-                            {doc.source && (
-                              <div className="flex items-center text-xs text-gray-500 dark:text-gray-400 mt-2">
-                                <span className="truncate">
-                                  <span className="font-medium">Source:</span> {doc.source}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="px-5 py-3 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          Updated {formatDistanceToNow(new Date(doc.updatedAt || doc.createdAt || Date.now()), { addSuffix: true })}
-                        </span>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
-                          onClick={() => handleDocumentClick(doc)}
-                        >
-                          View
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                
-                {/* Pagination */}
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 pt-4">
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      Showing <span className="font-medium">{(docCurrentPage - 1) * itemsPerPage + 1}</span> to{' '}
-                      <span className="font-medium">
-                        {Math.min(docCurrentPage * itemsPerPage, filteredDocuments.length)}
-                      </span>{' '}
-                      of <span className="font-medium">{filteredDocuments.length}</span> documents
-                    </div>
-                    <div className="flex space-x-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setDocCurrentPage(p => Math.max(1, p - 1))}
-                        disabled={docCurrentPage === 1}
-                        className="disabled:opacity-50"
-                      >
-                        Previous
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setDocCurrentPage(p => Math.min(totalPages, p + 1))}
-                        disabled={docCurrentPage === totalPages}
-                        className="disabled:opacity-50"
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Chat Area */}
-        <div className="bg-[#ffffff] rounded-lg p-6 border border-[#e5e7eb] mb-6 min-h-[180px]">
-          {chatHistory.length === 0 && (
-            <div className="flex items-start gap-3">
-              <Avatar className="w-8 h-8 bg-[#fb2c36] text-[#ffffff]">
-                <AvatarFallback className="bg-[#fb2c36] text-[#ffffff] font-bold">E</AvatarFallback>
-              </Avatar>
-              <div className="flex-1">
-                <p className="text-[#101828] leading-relaxed">
-                  Hello Priya! 👋 I'm your friendly ECHO AI assistant, here to support you as a Community Health Officer.
-                  Think of me as your knowledgeable colleague who's always ready to help! 😊 I can help you with
-                  comprehensive TB training covering all 12 modules - from basic TB knowledge to advanced topics like
-                  DRTB, counselling, Nikshay system, and community engagement. Don't worry about asking "silly" questions
-                  - we're all here to learn together! What would you like to explore today?
-                </p>
+                ))}
               </div>
             </div>
           )}
+
           {/* Show chat messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto space-y-4 pb-16">
             {chatHistory.map((message) => (
               <div key={message.id} className="relative">
                 <ChatMessage 
@@ -1324,42 +1084,41 @@ export default function Component() {
                 {chatError}
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
         </div>
 
-        {/* Input Field */}
-        <div className="relative flex items-center">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute left-2 top-1/2 transform -translate-y-1/2 w-8 h-8 text-[#717182] hover:text-[#101828]"
-          >
-            <Mic className="w-4 h-4" />
-          </Button>
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Type your query here..."
-            className="w-full pl-12 pr-12 py-3 text-base bg-[#ffffff] border-[#d1d5dc] rounded-full focus:border-[#efb100] focus:ring-[#efb100]"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !isChatLoading) handleSend()
-            }}
-            disabled={isChatLoading}
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 w-8 h-8 text-[#717182] hover:text-[#101828]"
-            onClick={handleSend}
-            disabled={isChatLoading || !query.trim()}
-            aria-label="Send message"
-          >
-            {isChatLoading ? (
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-          </Button>
+        {/* Input Field - Fixed at bottom */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-4">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Type your query here..."
+                  className="w-full px-4 py-3 text-xs sm:text-base bg-gray-200 border-gray-300 text-gray-800 placeholder-gray-500 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !isChatLoading) handleSend()
+                  }}
+                  disabled={isChatLoading}
+                />
+              </div>
+              <Button
+                size="icon"
+                className="w-11 h-11 rounded-full bg-gray-400 hover:bg-gray-500 text-white flex-shrink-0"
+                onClick={() => handleSend()}
+                disabled={isChatLoading || !query.trim()}
+                aria-label="Send message"
+              >
+                {isChatLoading ? (
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+              </Button>
+            </div>
+          </div>
         </div>
       </main>
     </div>
