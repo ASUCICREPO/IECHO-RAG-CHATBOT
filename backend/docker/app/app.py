@@ -441,10 +441,10 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     
     # Log complete conversation
     citations_log = json.dumps(current_citations) if current_citations else "[]"
-    log_message = f"Chat complete - User: {user_id}, Session: {session_id}, Response: {response_id}, Query: {query}, Response: {full_response}, Citations: {citations_log}"
+    log_message = f"Chat complete - User id: {user_id}, Session id: {session_id}, Response id: {response_id}, Query: {query}, Response: {full_response}, Citations: {citations_log}"
     logger.info(log_message)
     log_to_cloudwatch(log_message)
-    print(f"Chat complete - User: {user_id}, Session: {session_id}, Response: {response_id}, Query: {query}, Response: {full_response[:200]}...")
+    print(f"Chat complete - User id: {user_id}, Session id: {session_id}, Response id: {response_id}, Query: {query}, Response: {full_response[:200]}...")
     
     # Generate follow-up questions
     follow_up_questions = await generate_follow_up_questions(full_response, enhanced_query, conversation_history)
