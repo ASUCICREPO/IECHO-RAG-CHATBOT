@@ -28,7 +28,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 
 const questionCards = [
-  "What causes TB - bacterial, viral or both?",
+  "What causes TB?",
   "What are the main symptoms of pulmonary TB?",
   "What is Ni-Kshay used for?",
   "How to improve crop irrigation efficiency?",
@@ -39,7 +39,6 @@ const questionCards = [
 interface Citation {
   title: string;
   source: string;
-  excerpt: string;
 }
 
 interface ApiError {
@@ -86,52 +85,35 @@ function CitationList({ citations }: { citations: Citation[] }) {
         <div className="mt-2 space-y-1.5">
           {citations.map((cite, i) => (
             <div key={i} className="p-2 bg-gray-50 border border-gray-200 rounded text-xs">
-              <div className="font-medium text-gray-800 mb-1">
-                {cite.title.replace(/^#+\s*/, '').replace(/##\s*/g, ' - ')}
-              </div>
-              <div className="mb-1">
-                {cite.source.startsWith('s3://') ? (
-                  <button 
-                    onClick={async () => {
-                      try {
-                        const encodedPath = encodeURIComponent(cite.source);
-                        const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/document-url/${encodedPath}`);
-                        if (!response.ok) {
-                          throw new Error(`HTTP ${response.status}`);
-                        }
-                        const data = await response.json();
-                        if (data.url) {
-                          window.open(data.url, '_blank');
-                        } else {
-                          alert('Document URL not available');
-                        }
-                      } catch (error) {
-                        console.error('Failed to get document URL:', error);
-                        alert('Failed to open document');
+              {cite.source.startsWith('s3://') ? (
+                <button 
+                  onClick={async () => {
+                    try {
+                      const encodedPath = encodeURIComponent(cite.source);
+                      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/document-url/${encodedPath}`);
+                      if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
                       }
-                    }}
-                    className="text-left text-blue-700 hover:text-blue-900 hover:bg-blue-100 px-1 py-0.5 rounded transition-colors text-xs font-medium break-words"
-                  >
-                    📄 {cite.source.split('/').pop()?.replace('.pdf', '') || cite.source}
-                  </button>
-                ) : (
-                  <span className="text-gray-600 text-xs break-words">
-                    📄 {cite.source}
-                  </span>
-                )}
-              </div>
-              <div className="text-xs text-gray-600 leading-relaxed">
-                {(() => {
-                  const cleanExcerpt = cite.excerpt
-                    .replace(/^#+\s*/gm, '')
-                    .replace(/\*\*(.*?)\*\*/g, '$1')
-                    .replace(/\*(.*?)\*/g, '$1')
-                    .replace(/##\s*/g, ' - ')
-                    .trim();
-                  return cleanExcerpt.length > 200 ? cleanExcerpt.substring(0, 200) + '...' : cleanExcerpt;
-                })()
-                }
-              </div>
+                      const data = await response.json();
+                      if (data.url) {
+                        window.open(data.url, '_blank');
+                      } else {
+                        alert('Document URL not available');
+                      }
+                    } catch (error) {
+                      console.error('Failed to get document URL:', error);
+                      alert('Failed to open document');
+                    }
+                  }}
+                  className="text-left text-blue-700 hover:text-blue-900 hover:bg-blue-100 px-1 py-0.5 rounded transition-colors text-xs font-medium break-words"
+                >
+                  📄 {cite.source.split('/').pop()?.replace('.pdf', '') || cite.source}
+                </button>
+              ) : (
+                <span className="text-gray-600 text-xs break-words">
+                  📄 {cite.source}
+                </span>
+              )}
             </div>
           ))}
         </div>
