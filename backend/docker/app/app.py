@@ -20,6 +20,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 from strands import Agent, tool
+try:
+    from strands_tools import image_reader
+except ImportError:
+    image_reader = None
 
 # Conversation managers (in-memory; no persistence)
 try:
@@ -105,6 +109,7 @@ class ChatRequest(BaseModel):
     query: str
     userId: str
     sessionId: Optional[str] = None
+    image: Optional[str] = None  # Base64 encoded image
 
 class FeedbackRequest(BaseModel):
     userId: str
@@ -126,27 +131,32 @@ class ChatResponse(BaseModel):
 # -----------------------------------------------------------------------------
 # Prompts
 # -----------------------------------------------------------------------------
-ORCHESTRATOR_PROMPT = """You are an intelligent assistant for the iECHO platform.
+ORCHESTRATOR_PROMPT = """You are an intelligent assistant for the iECHO platform focused on TB and Agriculture.
 
-CRITICAL: Your first word must be exactly one token: <TB> or <AG> or <GN>
+CRITICAL: Your first word must be exactly one token: <TB> or <AG> or <GN> or <REJECT>
 
 No explanation. No reasoning. Just the token.
 
-<TB> = tuberculosis questions
-<AG> = agriculture questions  
-<GN> = general questions
+<TB> = if about tuberculosis/TB 
+<AG> = if about agriculture/farming
+<GN> = health/education topics that could relate to TB/agriculture
+<REJECT> = ONLY for completely unrelated content
 
-After the token, call the tool and provide the answer.
+After the token, call the appropriate tool.
 
 Available tools:
 - tb_specialist: Handles tuberculosis-related questions
 - agriculture_specialist: Handles agriculture/farming topics
-- general_specialist: Handles topics not covered by TB or Agriculture
+- general_specialist: Handles health/education topics related to TB/agriculture
+- reject_handler: Politely declines unrelated queries
 
 CRITICAL RULES:
 - NEVER use <thinking> tags or show internal reasoning
 - NEVER expose your thought process to users
-- Provide only the final answer, not your reasoning
+- If query mentions TB, use <TB>
+- If query mentions agriculture/farming/crops, use <AG>
+- When in doubt between TB/AG/GN, choose the most relevant one
+- Only use <REJECT> for clearly unrelated topics
 """
 
 TB_AGENT_PROMPT = """You are a TB specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
@@ -155,6 +165,7 @@ TB_AGENT_PROMPT = """You are a TB specialist. ALWAYS use the kb_search tool to f
 - Infection control & prevention strategies
 - Patient care guidelines & counseling
 Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.
+If an image is provided with the question, use it as additional context to better understand what the user is asking about.
 """
 
 AGRICULTURE_AGENT_PROMPT = """You are an Agriculture specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
@@ -162,6 +173,7 @@ AGRICULTURE_AGENT_PROMPT = """You are an Agriculture specialist. ALWAYS use the 
 - Food safety & nutrition, post-harvest handling
 - Practical farm best practices & infrastructure
 Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.
+If an image is provided with the question, use it as additional context to better understand what the user is asking about.
 """
 
 # -----------------------------------------------------------------------------
@@ -174,7 +186,7 @@ def filter_thinking_tags(text: str) -> str:
     text = re.sub(r'</?thinking[^>]*>', '', text)
     text = re.sub(r'Action: [^\n]*\n?', '', text)
     # Remove decision tokens and any following newlines
-    text = re.sub(r'^\s*<(TB|AG|GN)>\s*\n*', '', text)
+    text = re.sub(r'^\s*<(TB|AG|GN|REJECT)>\s*\n*', '', text)
     return text.strip()
 
 
@@ -234,6 +246,7 @@ def make_streaming_callback(on_tool_start: Optional[Callable[[str], None]] = Non
 # -----------------------------------------------------------------------------
 # Specialists & Agents-as-tools
 # -----------------------------------------------------------------------------
+
 def make_kb_tool(topic: str, citations_sink: list, conversation_history: List[str]):
     """Returns a KB search tool bound to a specific specialty."""
     @tool
@@ -272,23 +285,33 @@ def build_specialists(conversation_history: List[str]):
     else:
         conv_mgr = None
 
+    # Build tools list
+    tb_tools = [make_kb_tool("tuberculosis", tb_citations, conversation_history)]
+    agri_tools = [make_kb_tool("agriculture", agri_citations, conversation_history)]
+    gen_tools = [make_kb_tool("general", gen_citations, conversation_history)]
+    
+    if image_reader:
+        tb_tools.append(image_reader)
+        agri_tools.append(image_reader)
+        gen_tools.append(image_reader)
+    
     tb_agent = Agent(
-        system_prompt=TB_AGENT_PROMPT,
-        tools=[make_kb_tool("tuberculosis", tb_citations, conversation_history)],
+        system_prompt=TB_AGENT_PROMPT + ("\nIf user mentions an image, use image_reader tool first to analyze it." if image_reader else ""),
+        tools=tb_tools,
         model="us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
     )
 
     agri_agent = Agent(
-        system_prompt=AGRICULTURE_AGENT_PROMPT,
-        tools=[make_kb_tool("agriculture", agri_citations, conversation_history)],
+        system_prompt=AGRICULTURE_AGENT_PROMPT + ("\nIf user mentions an image, use image_reader tool first to analyze it." if image_reader else ""),
+        tools=agri_tools,
         model="us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
     )
 
     general_agent = Agent(
-        system_prompt="You are a concise generalist who answers topics outside TB/Agriculture; prefer the KB when possible.",
-        tools=[make_kb_tool("general", gen_citations, conversation_history)],
+        system_prompt="You are a concise generalist who answers topics outside TB/Agriculture; prefer the KB when possible." + ("\nIf user mentions an image, use image_reader tool first to analyze it." if image_reader else ""),
+        tools=gen_tools,
         model="us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
     )
@@ -338,6 +361,11 @@ def build_agent_tools(conversation_history: List[str]):
         agent, _ = specialists["general"]
         return await _run_agent_and_capture(agent, user_query)
 
+    @tool
+    async def reject_handler(user_query: str) -> str:
+        """Politely decline queries unrelated to TB, agriculture, or health topics."""
+        return "I'm sorry, but I can only help with questions related to tuberculosis (TB), agriculture, and related health topics. If you have an image related to TB or agriculture, please describe what you'd like to know about it in your question."
+
     def get_last_citations(tool_name: Optional[str]):
         mapping = {
             "tb_specialist": specialists["tb"][1],
@@ -346,7 +374,7 @@ def build_agent_tools(conversation_history: List[str]):
         }
         return mapping.get(tool_name, [])
 
-    return [tb_specialist, agriculture_specialist, general_specialist], get_last_citations
+    return [tb_specialist, agriculture_specialist, general_specialist, reject_handler], get_last_citations
 
 # -----------------------------------------------------------------------------
 # Follow-up generation (unchanged logic; reasoning suppressed by filtering)
@@ -412,7 +440,7 @@ Format: Return only the questions, one per line, without numbers or bullets."""
 # -----------------------------------------------------------------------------
 # Orchestrator (Streaming)
 # -----------------------------------------------------------------------------
-async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
+async def run_orchestrator_agent(query: str, session_id: str, user_id: str, image: Optional[str] = None):
     # GC old sessions (1h)
     now = time()
     for sid, data in list(conversation_sessions.items()):
@@ -423,7 +451,36 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     sess = conversation_sessions[session_id]
     sess['last_access'] = now
     history = sess['history']
-
+    
+    # Save image to temp file for image_reader tool
+    if image:
+        import tempfile
+        import base64
+        import os
+        # Detect image format from base64 data
+        img_data = base64.b64decode(image)
+        if img_data.startswith(b'\x89PNG'):
+            ext = '.png'
+        elif img_data.startswith(b'\xff\xd8\xff'):
+            ext = '.jpg'
+        elif img_data.startswith(b'GIF'):
+            ext = '.gif'
+        elif img_data.startswith(b'RIFF') and b'WEBP' in img_data[:12]:
+            ext = '.webp'
+        else:
+            ext = '.png'  # default
+        
+        temp_fd, temp_path = tempfile.mkstemp(suffix=ext)
+        try:
+            with os.fdopen(temp_fd, 'wb') as f:
+                f.write(img_data)
+            os.chmod(temp_path, 0o644)
+            query = f"Image path: {temp_path}\n{query}"
+        except Exception as e:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise e
+    
     tools, get_last_citations = build_agent_tools(history)
 
     # Orchestrator conversation manager
@@ -443,6 +500,9 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     tracker = ToolChoiceTracker()
     cb = make_streaming_callback(on_tool_start=tracker.set)
 
+    # Prepare input - images handled by image_reader tool
+    input_content = query
+    
     orchestrator = Agent(
         system_prompt=context_prompt,
         tools=tools,
@@ -454,7 +514,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     full_text = ""
     in_thinking = False
     
-    async for ev in orchestrator.stream_async(query):
+    async for ev in orchestrator.stream_async(input_content):
         # Suppress reasoning/errors
         if ev.get("reasoning") or ev.get("force_stop") or ev.get("error") or ev.get("exception"):
             continue
@@ -505,6 +565,13 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
     logger.info(log_message)
     log_to_cloudwatch(log_message)
 
+    # Cleanup temp image file
+    if image and 'temp_path' in locals() and os.path.exists(temp_path):
+        try:
+            os.unlink(temp_path)
+        except:
+            pass
+    
     yield json.dumps({
         "response": full_text,
         "citations": [{"title": c.get("title", ""), "source": c.get("source", "")} for c in citations],
@@ -517,7 +584,36 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str):
 # -----------------------------------------------------------------------------
 # Orchestrator (Non-streaming; parity with streaming)
 # -----------------------------------------------------------------------------
-async def run_orchestrator_once(query: str, history: List[str]):
+async def run_orchestrator_once(query: str, history: List[str], image: Optional[str] = None):
+    # Save image to temp file for image_reader tool
+    if image:
+        import tempfile
+        import base64
+        import os
+        # Detect image format from base64 data
+        img_data = base64.b64decode(image)
+        if img_data.startswith(b'\x89PNG'):
+            ext = '.png'
+        elif img_data.startswith(b'\xff\xd8\xff'):
+            ext = '.jpg'
+        elif img_data.startswith(b'GIF'):
+            ext = '.gif'
+        elif img_data.startswith(b'RIFF') and b'WEBP' in img_data[:12]:
+            ext = '.webp'
+        else:
+            ext = '.png'  # default
+        
+        temp_fd, temp_path = tempfile.mkstemp(suffix=ext)
+        try:
+            with os.fdopen(temp_fd, 'wb') as f:
+                f.write(img_data)
+            os.chmod(temp_path, 0o644)
+            query = f"Image path: {temp_path}\n{query}"
+        except Exception as e:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise e
+    
     tools, get_last_citations = build_agent_tools(history)
 
     if SummarizingConversationManager is not None:
@@ -538,8 +634,11 @@ async def run_orchestrator_once(query: str, history: List[str]):
         callback_handler=cb
     )
 
+    # Prepare input - images handled by image_reader tool
+    input_content = query
+    
     buffer: List[str] = []
-    async for ev in orchestrator.stream_async(query):
+    async for ev in orchestrator.stream_async(input_content):
         if ev.get("reasoning") or ev.get("force_stop") or ev.get("error") or ev.get("exception"):
             continue
         if 'tool' in ev and ev.get('phase') in ('start', 'call', 'begin'):
@@ -552,6 +651,14 @@ async def run_orchestrator_once(query: str, history: List[str]):
 
     text = filter_thinking_tags("".join(buffer))
     citations = get_last_citations(tracker.name)
+    
+    # Cleanup temp image file
+    if image and 'temp_path' in locals() and os.path.exists(temp_path):
+        try:
+            os.unlink(temp_path)
+        except:
+            pass
+    
     return text, citations, tracker.name
 
 # -----------------------------------------------------------------------------
@@ -570,6 +677,8 @@ async def chat(request: ChatRequest):
     try:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
+        if request.image and len(request.image) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Image too large. Maximum size is 5MB.")
         if not KNOWLEDGE_BASE_ID:
             raise HTTPException(status_code=500, detail="Knowledge Base not configured")
 
@@ -580,7 +689,7 @@ async def chat(request: ChatRequest):
         sess['last_access'] = time()
         history = sess['history']
 
-        response_text, citations, chosen_tool = await run_orchestrator_once(request.query, history)
+        response_text, citations, chosen_tool = await run_orchestrator_once(request.query, history, request.image)
 
         # Update history
         history.append(f"User: {request.query}")
@@ -615,12 +724,14 @@ async def chat_stream(request: ChatRequest):
     try:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
+        if request.image and len(request.image) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Image too large. Maximum size is 5MB.")
         if not KNOWLEDGE_BASE_ID:
             raise HTTPException(status_code=500, detail="Knowledge Base not configured")
 
         session_id = request.sessionId or str(uuid4())
         return StreamingResponse(
-            run_orchestrator_agent(request.query, session_id, request.userId),
+            run_orchestrator_agent(request.query, session_id, request.userId, request.image),
             media_type="application/x-ndjson"
         )
 
