@@ -1123,6 +1123,8 @@ export default function Component() {
             </div>
           </div>
 
+
+
           {/* Question Cards */}
           {showQuickStart && (
             <div className="ml-11 mr-11 grid gap-1 sm:gap-2 mb-4">
@@ -1172,10 +1174,9 @@ export default function Component() {
             {isChatLoading && (
               <div className="flex justify-start">
                 <div className="bg-gray-100 p-3 rounded-lg max-w-[80%]">
-                  <div className="flex space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce"></div>
-                    <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-bounce"></div>
+                    <span className="text-sm text-gray-600">{chatHistory.length === 0 || chatHistory[chatHistory.length - 1]?.sender === 'user' ? 'Thinking...' : 'Processing...'}</span>
                   </div>
                 </div>
               </div>
@@ -1191,7 +1192,7 @@ export default function Component() {
 
         {/* Image Preview - Above input */}
         {imagePreview && (
-          <div className="fixed bottom-20 left-4 right-4 flex justify-center">
+          <div className="fixed bottom-32 left-4 right-4 flex justify-center z-20">
             <div className="relative">
               <div className="bg-white rounded-lg overflow-hidden shadow-lg">
                 <img src={imagePreview} alt="Upload preview" className="max-w-xs max-h-32 rounded-lg" />
@@ -1208,8 +1209,19 @@ export default function Component() {
         
 
         
+
+
         {/* Input Field - Fixed at bottom */}
         <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-2 sm:p-4">
+          {/* Upload Animation above chat bar */}
+          {isImageUploading && (
+            <div className="max-w-4xl mx-auto mb-2">
+              <div className="w-full bg-blue-400 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-full flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce"></div>
+                <span className="text-sm">Uploading...</span>
+              </div>
+            </div>
+          )}
           <div className="max-w-4xl mx-auto">
             <div className="flex items-center gap-3">
               <input
@@ -1258,15 +1270,18 @@ export default function Component() {
               </Button>
             </div>
             
-            {/* Upload Animation below chat bar */}
-            {isImageUploading && (
-              <div className="mt-3">
-                <div className="w-full bg-blue-400 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-full flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-white animate-bounce"></div>
-                  <span className="text-sm">Uploading...</span>
-                </div>
+          </div>
+          
+          {/* Disclaimer below chat bar */}
+          <div className="max-w-4xl mx-auto mt-2">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-1.5 sm:p-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-3 h-3 text-yellow-600 flex-shrink-0" />
+                <p className="text-xs text-yellow-800">
+                  <strong>Disclaimer:</strong> For educational purposes only. Not medical advice.
+                </p>
               </div>
-            )}
+            </div>
           </div>
         </div>
       </main>
