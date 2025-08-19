@@ -1,8 +1,21 @@
-# iECHO RAG Chatbot API — Multi-Agent Orchestrator via Strands (clean design)
-# - Orchestrator uses agents-as-tools; NO hardcoded routing/classifier.
-# - Per-session in-memory conversation managers for tight context (no persistence).
-# - Reasoning suppression at stream-event level.
-# - Logs which specialist tool (agent) was selected.
+# iECHO RAG Chatbot API — Multi-Agent Orchestrator via Strands Framework
+# 
+# ARCHITECTURE OVERVIEW:
+# - Orchestrator Agent: Routes queries to specialized domain agents using natural language
+# - Specialist Agents: TB, Agriculture, and General health/education experts
+# - Knowledge Base Integration: AWS Bedrock Knowledge Base with vector search
+# - Streaming Support: Real-time response streaming with reasoning suppression
+# - Session Management: In-memory conversation history with TTL cleanup
+# - Image Analysis: Optional image processing via strands_tools.image_reader
+# 
+# KEY FEATURES:
+# - No hardcoded routing - orchestrator decides which specialist to use
+# - Streaming and non-streaming endpoints for different use cases
+# - Citation tracking from knowledge base responses
+# - Follow-up question generation
+# - User feedback collection via DynamoDB
+# - CloudWatch logging integration
+# - Health monitoring and status endpoints
 
 from typing import List, Dict, Optional, Callable
 from uuid import uuid4

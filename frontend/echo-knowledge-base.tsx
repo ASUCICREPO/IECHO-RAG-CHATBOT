@@ -1289,7 +1289,7 @@ export default function Component() {
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-3 h-3 text-yellow-600 flex-shrink-0" />
                 <p className="text-xs text-yellow-800">
-                  <strong>Disclaimer:</strong> For educational purposes only. Not medical advice.
+                  <strong>Disclaimer:</strong> The ECHO agent is intended solely for informational and educational purposes. It is not a substitute for professional medical advice, diagnosis, or treatment.
                 </p>
               </div>
             </div>
