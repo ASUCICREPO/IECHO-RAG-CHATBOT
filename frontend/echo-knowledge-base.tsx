@@ -472,6 +472,8 @@ export default function Component() {
     const textToSend = messageText || query.trim();
     if (!textToSend || isChatLoading) return;
     
+
+    
     setIsChatLoading(true);
     setChatError(null);
     
@@ -522,7 +524,15 @@ export default function Component() {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // Try to get the error message from the response
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch (parseError) {
+          // If JSON parsing fails, use the status-based message
+        }
+        throw new Error(errorMessage);
       }
       
       const reader = response.body!.getReader();
@@ -600,15 +610,14 @@ export default function Component() {
     } catch (error) {
       console.error('Chat error:', error);
       
-      const errorMessage = error instanceof Error ? 
-        error.message : 'Failed to get response from the chatbot. Please try again.';
+      let errorMessage = 'Failed to get response from the chatbot. Please try again.';
       
-      setChatHistory(prev => [...prev, { 
-        id: `error-${Date.now()}`,
-        sender: 'ai', 
-        text: `Error: ${errorMessage}`,
-        error: true
-      }]);
+      if (error instanceof Error) {
+        // Clean up error message - remove technical prefixes
+        errorMessage = error.message
+          .replace(/^Internal server error: \d+: /, '')
+          .replace(/^HTTP error! status: \d+/, 'Connection error');
+      }
       
       setChatError(errorMessage);
     } finally {
@@ -1115,7 +1124,7 @@ export default function Component() {
         </div>
       </header>
 
-      <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-2 sm:py-4 overflow-y-auto pb-32">
+      <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-2 sm:py-4 overflow-y-auto pb-48">
         {/* Chat Area */}
         <div className="p-2 sm:p-6 mx-1 sm:mx-4">
           {/* Banner positioned like chat messages */}
@@ -1154,7 +1163,7 @@ export default function Component() {
           )}
 
           {/* Show chat messages */}
-          <div className="flex-1 overflow-y-auto space-y-4 pb-16">
+          <div className="flex-1 overflow-y-auto space-y-4 pb-24">
             {chatHistory.map((message, index) => {
               // Only show follow-up questions for the latest AI message
               const isLatestAiMessage = message.sender === 'ai' && 
@@ -1258,7 +1267,7 @@ export default function Component() {
                       setCurrentFollowUps([]);
                     }
                   }}
-                  placeholder="Type your query here..."
+                  placeholder="Type your query here... (max 150 tokens)"
                   className="w-full px-4 py-3 text-xs sm:text-base bg-gray-200 border-gray-300 text-gray-800 placeholder-gray-500 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !isChatLoading) handleSend()
@@ -1281,6 +1290,7 @@ export default function Component() {
               </Button>
             </div>
             
+
           </div>
           
           {/* Disclaimer below chat bar */}

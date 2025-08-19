@@ -26,6 +26,10 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 from collections import defaultdict
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -188,6 +192,26 @@ If image analysis results are provided in the query, use them as additional cont
 # -----------------------------------------------------------------------------
 # Utilities
 # -----------------------------------------------------------------------------
+def count_tokens(text: str) -> int:
+    """Count tokens in text using tiktoken for Nova Lite model.
+    
+    Args:
+        text: Input text to count tokens for
+        
+    Returns:
+        Number of tokens in the text
+    """
+    try:
+        if tiktoken:
+            # Use cl100k_base encoding which is compatible with most models
+            encoding = tiktoken.get_encoding("cl100k_base")
+            return len(encoding.encode(text))
+    except Exception as e:
+        logger.warning(f"Token counting failed: {e}")
+    
+    # Fallback to character-based estimation
+    return len(text) // 4
+
 def filter_thinking_tags(text: str) -> str:
     """Remove any model-inserted thinking tags if they appear in visible output."""
     import re
@@ -715,6 +739,9 @@ async def chat(request: ChatRequest):
     try:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
+        token_count = count_tokens(request.query)
+        if token_count > 150:
+            raise HTTPException(status_code=400, detail=f"Query too long. {token_count} tokens provided, maximum 150 tokens allowed.")
         if request.image and len(request.image) > 5 * 1024 * 1024:
             raise HTTPException(status_code=413, detail="Image too large. Maximum size is 5MB.")
         if not KNOWLEDGE_BASE_ID:
@@ -766,6 +793,9 @@ async def chat_stream(request: ChatRequest):
     try:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
+        token_count = count_tokens(request.query)
+        if token_count > 150:
+            raise HTTPException(status_code=400, detail=f"Query too long. {token_count} tokens provided, maximum 150 tokens allowed.")
         if request.image and len(request.image) > 5 * 1024 * 1024:
             raise HTTPException(status_code=413, detail="Image too large. Maximum size is 5MB.")
         if not KNOWLEDGE_BASE_ID:

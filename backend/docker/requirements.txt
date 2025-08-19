@@ -4,3 +4,4 @@ pydantic==2.11.4
 strands-agents
 strands-agents-tools
 boto3
+tiktoken
