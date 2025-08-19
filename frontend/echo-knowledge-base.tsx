@@ -627,6 +627,12 @@ export default function Component() {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith('image/')) {
       setIsImageUploading(true);
+      // Clear follow-up questions when new image is uploaded
+      setCurrentFollowUps([]);
+      // Clear follow-up questions from chat history
+      setChatHistory(prev => prev.map(msg => 
+        msg.sender === 'ai' ? { ...msg, followUpQuestions: [] } : msg
+      ));
       const reader = new FileReader();
       reader.onload = (e) => {
         const result = e.target?.result as string;
@@ -1230,10 +1236,15 @@ export default function Component() {
                 onChange={handleImageUpload}
                 className="hidden"
                 id="image-upload"
+                disabled={isChatLoading}
               />
               <label
                 htmlFor="image-upload"
-                className="w-11 h-11 text-gray-500 hover:text-blue-600 hover:bg-blue-100 cursor-pointer flex items-center justify-center flex-shrink-0 rounded-full transition-colors"
+                className={`w-11 h-11 flex items-center justify-center flex-shrink-0 rounded-full transition-colors ${
+                  isChatLoading 
+                    ? 'text-gray-300 cursor-not-allowed' 
+                    : 'text-gray-500 hover:text-blue-600 hover:bg-blue-100 cursor-pointer'
+                }`}
               >
                 <ImagePlus className="w-5 h-5" />
               </label>

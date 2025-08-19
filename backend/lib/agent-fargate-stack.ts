@@ -201,8 +201,8 @@ export class AgentEksFargateStack extends Stack {
                 { name: "FEEDBACK_TABLE_NAME", value: feedbackTable.tableName },
               ],
               resources: {
-                requests: { memory: "256Mi", cpu: "250m" },
-                limits: { memory: "512Mi", cpu: "500m" },
+                requests: { memory: "512Mi", cpu: "500m" },
+                limits: { memory: "1Gi", cpu: "1000m" },
               },
               livenessProbe: { httpGet: { path: "/health", port: 8000 }, initialDelaySeconds: 30, periodSeconds: 10 },
               readinessProbe: { httpGet: { path: "/health", port: 8000 }, initialDelaySeconds: 5, periodSeconds: 5 },
@@ -230,7 +230,7 @@ export class AgentEksFargateStack extends Stack {
           "alb.ingress.kubernetes.io/target-type": "ip",
           "alb.ingress.kubernetes.io/healthcheck-path": "/health",
           "alb.ingress.kubernetes.io/load-balancer-attributes":
-            "deletion_protection.enabled=false,idle_timeout.timeout_seconds=60",
+            "deletion_protection.enabled=false,idle_timeout.timeout_seconds=300",
           "alb.ingress.kubernetes.io/target-group-attributes":
             "deregistration_delay.timeout_seconds=30", // CHANGE: faster TG drain on delete
           "alb.ingress.kubernetes.io/tags": "Environment=dev,ManagedBy=CDK",

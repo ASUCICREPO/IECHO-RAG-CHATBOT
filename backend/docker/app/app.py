@@ -133,30 +133,26 @@ class ChatResponse(BaseModel):
 # -----------------------------------------------------------------------------
 ORCHESTRATOR_PROMPT = """You are an intelligent assistant for the iECHO platform focused on TB and Agriculture.
 
-CRITICAL: Your first word must be exactly one token: <TB> or <AG> or <GN> or <REJECT>
+Your job is to analyze the user's query and provide a helpful response by calling the appropriate specialist tool.
 
-No explanation. No reasoning. Just the token.
+Analysis tools (use first if needed):
+- image_reader: Analyze images to understand visual content
 
-<TB> = if about tuberculosis/TB 
-<AG> = if about agriculture/farming
-<GN> = health/education topics that could relate to TB/agriculture
-<REJECT> = ONLY for completely unrelated content
-
-After the token, call the appropriate tool.
-
-Available tools:
+Specialist tools (choose one for final response):
 - tb_specialist: Handles tuberculosis-related questions
-- agriculture_specialist: Handles agriculture/farming topics
-- general_specialist: Handles health/education topics related to TB/agriculture
+- agriculture_specialist: Handles agriculture/farming topics  
+- general_specialist: Handles health/education topics that relate to TB or agriculture
 - reject_handler: Politely declines unrelated queries
 
 CRITICAL RULES:
-- NEVER use <thinking> tags or show internal reasoning
-- NEVER expose your thought process to users
-- If query mentions TB, use <TB>
-- If query mentions agriculture/farming/crops, use <AG>
-- When in doubt between TB/AG/GN, choose the most relevant one
-- Only use <REJECT> for clearly unrelated topics
+- If query contains "Image path:", use image_reader FIRST, then route to appropriate specialist
+- Always end with exactly one specialist tool call for the final response
+- NEVER show tool calls, reasoning, or internal processes to the user
+- Only return the clean, helpful response from the specialist
+- Route TB-related questions to tb_specialist
+- Route agriculture-related questions to agriculture_specialist
+- Route ambiguous questions that may connect to TB or agriculture contexts to general_specialist
+- Use reject_handler ONLY when the query has no meaningful connection to TB, agriculture, or related health/education contexts
 """
 
 TB_AGENT_PROMPT = """You are a TB specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
@@ -165,7 +161,7 @@ TB_AGENT_PROMPT = """You are a TB specialist. ALWAYS use the kb_search tool to f
 - Infection control & prevention strategies
 - Patient care guidelines & counseling
 Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.
-If an image is provided with the question, use it as additional context to better understand what the user is asking about.
+If image analysis results are provided in the query, use them as additional context.
 """
 
 AGRICULTURE_AGENT_PROMPT = """You are an Agriculture specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
@@ -173,7 +169,7 @@ AGRICULTURE_AGENT_PROMPT = """You are an Agriculture specialist. ALWAYS use the 
 - Food safety & nutrition, post-harvest handling
 - Practical farm best practices & infrastructure
 Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.
-If an image is provided with the question, use it as additional context to better understand what the user is asking about.
+If image analysis results are provided in the query, use them as additional context.
 """
 
 # -----------------------------------------------------------------------------
@@ -221,7 +217,8 @@ class ToolChoiceTracker:
     def __init__(self):
         self.name: Optional[str] = None
     def set(self, name: Optional[str]):
-        if name:
+        # Only track specialist tools, not analysis tools
+        if name and name in ['tb_specialist', 'agriculture_specialist', 'general_specialist', 'reject_handler']:
             self.name = name
 
 def make_streaming_callback(on_tool_start: Optional[Callable[[str], None]] = None):
@@ -285,32 +282,27 @@ def build_specialists(conversation_history: List[str]):
     else:
         conv_mgr = None
 
-    # Build tools list
+    # Build tools list (no image_reader at specialist level)
     tb_tools = [make_kb_tool("tuberculosis", tb_citations, conversation_history)]
     agri_tools = [make_kb_tool("agriculture", agri_citations, conversation_history)]
     gen_tools = [make_kb_tool("general", gen_citations, conversation_history)]
     
-    if image_reader:
-        tb_tools.append(image_reader)
-        agri_tools.append(image_reader)
-        gen_tools.append(image_reader)
-    
     tb_agent = Agent(
-        system_prompt=TB_AGENT_PROMPT + ("\nIf user mentions an image, use image_reader tool first to analyze it." if image_reader else ""),
+        system_prompt=TB_AGENT_PROMPT,
         tools=tb_tools,
         model="us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
     )
 
     agri_agent = Agent(
-        system_prompt=AGRICULTURE_AGENT_PROMPT + ("\nIf user mentions an image, use image_reader tool first to analyze it." if image_reader else ""),
+        system_prompt=AGRICULTURE_AGENT_PROMPT,
         tools=agri_tools,
         model="us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
     )
 
     general_agent = Agent(
-        system_prompt="You are a concise generalist who answers topics outside TB/Agriculture; prefer the KB when possible." + ("\nIf user mentions an image, use image_reader tool first to analyze it." if image_reader else ""),
+        system_prompt="You are a generalist for health/education topics related to TB or agriculture. ALWAYS use the kb_search tool to find information, then provide brief, direct answers. Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.",
         tools=gen_tools,
         model="us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
@@ -322,17 +314,19 @@ def build_specialists(conversation_history: List[str]):
         "general": (general_agent, gen_citations),
     }
 
-def build_agent_tools(conversation_history: List[str]):
+def build_orchestrator_tools(conversation_history: List[str]):
     """
-    Wrap each specialist Agent as a tool (agents-as-tools).
+    Build tools for the orchestrator including image_reader and specialist agents.
     The orchestrator will decide which one to call; we do not hardcode routing.
     """
     specialists = build_specialists(conversation_history)
 
+    # Store image analysis result to pass to specialists and logs
+    context = {'image_analysis': None}
+    
     async def _run_agent_and_capture(agent: Agent, query: str) -> str:
         """Run a specialist agent once and capture visible text only (reasoning suppressed)."""
         buffer: List[str] = []
-        # Use per-call buffering via inline callback that drops reasoning & appends data we pull from stream loop
         async for ev in agent.stream_async(query):
             if ev.get("reasoning") or ev.get("force_stop") or ev.get("error") or ev.get("exception"):
                 continue
@@ -343,6 +337,8 @@ def build_agent_tools(conversation_history: List[str]):
                 buffer.append(chunk)
         return filter_thinking_tags("".join(buffer))
 
+
+    
     @tool
     async def tb_specialist(user_query: str) -> str:
         """TB specialist agent: diagnosis, tests, protocols, MDR/XDR, prevention, patient counseling."""
@@ -374,7 +370,17 @@ def build_agent_tools(conversation_history: List[str]):
         }
         return mapping.get(tool_name, [])
 
-    return [tb_specialist, agriculture_specialist, general_specialist, reject_handler], get_last_citations
+    # Build orchestrator tools list
+    orchestrator_tools = []
+    
+    # Add image_reader if available
+    if image_reader:
+        orchestrator_tools.append(image_reader)
+    
+    # Add specialist tools
+    orchestrator_tools.extend([tb_specialist, agriculture_specialist, general_specialist, reject_handler])
+    
+    return orchestrator_tools, get_last_citations, context
 
 # -----------------------------------------------------------------------------
 # Follow-up generation (unchanged logic; reasoning suppressed by filtering)
@@ -453,6 +459,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     history = sess['history']
     
     # Save image to temp file for image_reader tool
+    temp_path = None
     if image:
         import tempfile
         import base64
@@ -477,11 +484,11 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
             os.chmod(temp_path, 0o644)
             query = f"Image path: {temp_path}\n{query}"
         except Exception as e:
-            if os.path.exists(temp_path):
+            if temp_path and os.path.exists(temp_path):
                 os.unlink(temp_path)
             raise e
     
-    tools, get_last_citations = build_agent_tools(history)
+    tools, get_last_citations, image_context = build_orchestrator_tools(history)
 
     # Orchestrator conversation manager
     if SummarizingConversationManager is not None:
@@ -514,7 +521,15 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     full_text = ""
     in_thinking = False
     
+    start_time = time()
+    timeout_seconds = 25
+    
     async for ev in orchestrator.stream_async(input_content):
+        # Check timeout
+        if time() - start_time > timeout_seconds:
+            yield json.dumps({"type": "error", "data": "Request timeout. Please try again."}) + "\n"
+            return
+            
         # Suppress reasoning/errors
         if ev.get("reasoning") or ev.get("force_stop") or ev.get("error") or ev.get("exception"):
             continue
@@ -556,17 +571,23 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     response_id = str(uuid4())
     followups = await generate_follow_up_questions(full_text, query, history)
 
-    # Single, clean log line with selected agent
+    # Include image analysis in logs (captured after orchestrator execution)
+    log_query = query
+    if image_context['image_analysis']:
+        log_query = f"Query: {query} | Image: {image_context['image_analysis'][:200]}..."
+    elif image:
+        log_query = f"[IMAGE_PROVIDED] {query}"
+    
     log_message = (
         f"Chat complete - User id: {user_id}, Session id: {session_id}, Response id: {response_id}, "
-        f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {query}, Response: {full_text}, "
+        f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {log_query}, Response: {full_text}, "
         f"Citations: {json.dumps(citations) if citations else '[]'}"
     )
     logger.info(log_message)
     log_to_cloudwatch(log_message)
 
     # Cleanup temp image file
-    if image and 'temp_path' in locals() and os.path.exists(temp_path):
+    if temp_path and os.path.exists(temp_path):
         try:
             os.unlink(temp_path)
         except:
@@ -586,6 +607,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
 # -----------------------------------------------------------------------------
 async def run_orchestrator_once(query: str, history: List[str], image: Optional[str] = None):
     # Save image to temp file for image_reader tool
+    temp_path = None
     if image:
         import tempfile
         import base64
@@ -608,13 +630,16 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
             with os.fdopen(temp_fd, 'wb') as f:
                 f.write(img_data)
             os.chmod(temp_path, 0o644)
-            query = f"Image path: {temp_path}\n{query}"
         except Exception as e:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
             raise e
     
-    tools, get_last_citations = build_agent_tools(history)
+    tools, get_last_citations, image_context = build_orchestrator_tools(history)
+    
+    # Add image path to query for orchestrator
+    if temp_path:
+        query = f"Image path: {temp_path}\n{query}"
 
     if SummarizingConversationManager is not None:
         orch_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
@@ -653,7 +678,7 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
     citations = get_last_citations(tracker.name)
     
     # Cleanup temp image file
-    if image and 'temp_path' in locals() and os.path.exists(temp_path):
+    if temp_path and os.path.exists(temp_path):
         try:
             os.unlink(temp_path)
         except:
@@ -697,10 +722,14 @@ async def chat(request: ChatRequest):
 
         followups = await generate_follow_up_questions(response_text, request.query, history)
 
-        # Log with selected agent
+        # Log with selected agent and image context if available
+        log_query = request.query
+        if request.image:
+            log_query = f"[IMAGE_PROVIDED] {request.query}"
+        
         log_message = (
             f"Chat complete - User: {request.userId}, Session: {session_id}, Response: {response_id}, "
-            f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {request.query}, Response: {response_text}, "
+            f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {log_query}, Response: {response_text}, "
             f"Citations: {json.dumps(citations) if citations else '[]'}"
         )
         logger.info(log_message)
