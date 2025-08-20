@@ -3,6 +3,13 @@
 import { useState, useEffect, useMemo, useRef } from "react"
 import session from './utils/session'
 const { getOrCreateSessionId } = session;
+
+// Token counting function (approximates tiktoken cl100k_base)
+function countTokens(text: string): number {
+  // Split by whitespace and punctuation to approximate tokenization
+  const tokens = text.split(/\s+|(?=[.,!?;:()\[\]{}"'`~@#$%^&*+=<>|\\/])|(?<=[.,!?;:()\[\]{}"'`~@#$%^&*+=<>|\\/])/).filter(t => t.trim());
+  return tokens.length;
+}
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -1124,7 +1131,20 @@ export default function Component() {
         </div>
       </header>
 
-      <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-2 sm:py-4 overflow-y-auto pb-48">
+      <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-2 sm:py-4 overflow-y-auto pb-32">
+        {/* Disclaimer - Fixed at top of scroll area */}
+        <div className="sticky top-0 z-10 pt-0 pb-2">
+          <div className="max-w-4xl mx-auto px-2 sm:px-6">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-0.5 py-1.5 sm:p-1.5">
+              <div className="flex justify-center">
+                <p className="text-[10px] sm:text-xs text-yellow-800 text-center">
+                  ⚠️ For informational purposes only. Not a substitute for professional medical advice.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
         {/* Chat Area */}
         <div className="p-2 sm:p-6 mx-1 sm:mx-4">
           {/* Banner positioned like chat messages */}
@@ -1270,7 +1290,7 @@ export default function Component() {
                   placeholder="Type your query here..."
                   className="w-full px-4 py-3 text-xs sm:text-base bg-gray-200 border-gray-300 text-gray-800 placeholder-gray-500 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !isChatLoading) handleSend()
+                    if (e.key === 'Enter' && !isChatLoading && countTokens(query) <= 150) handleSend()
                   }}
                   disabled={isChatLoading}
                 />
@@ -1279,7 +1299,7 @@ export default function Component() {
                 size="icon"
                 className="w-11 h-11 rounded-full bg-gray-400 hover:bg-blue-500 text-white flex-shrink-0 transition-colors"
                 onClick={() => handleSend()}
-                disabled={isChatLoading || !query.trim()}
+                disabled={isChatLoading || !query.trim() || countTokens(query) > 150}
                 aria-label="Send message"
               >
                 {isChatLoading ? (
@@ -1293,17 +1313,15 @@ export default function Component() {
 
           </div>
           
-          {/* Disclaimer below chat bar */}
-          <div className="max-w-4xl mx-auto mt-2">
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-1.5 sm:p-2">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-3 h-3 text-yellow-600 flex-shrink-0" />
-                <p className="text-xs text-yellow-800">
-                  <strong>Disclaimer:</strong> For informational/educational purposes only. Not a substitute for professional medical advice.
-                </p>
-              </div>
+          {/* Token counter */}
+          <div className="max-w-4xl mx-auto mt-1 mb-1">
+            <div className="flex justify-between items-center px-2">
+              <span className="text-xs text-gray-500">Token usage</span>
+              <span className={`text-xs ${countTokens(query) > 150 ? 'text-red-500' : 'text-gray-500'}`}>{countTokens(query)}/150</span>
             </div>
           </div>
+          
+
         </div>
       </main>
     </div>
