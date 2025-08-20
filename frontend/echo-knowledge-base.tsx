@@ -945,16 +945,16 @@ export default function Component() {
         setShowRatingDialog(true);
       }
     }}>
-      <DialogContent className="bg-white rounded-xl border-0 shadow-2xl p-0 overflow-hidden w-full max-w-md">
+      <DialogContent className="bg-white rounded-xl border-0 shadow-2xl p-0 overflow-hidden w-[90vw] max-w-md">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-blue-500 p-6 text-white">
           <div className="flex justify-between items-center mb-2">
-            <DialogTitle className="text-xl font-bold flex items-center gap-2">
-              <Star className="w-5 h-5 text-yellow-300 fill-yellow-300" />
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Star className="w-4 h-4 text-yellow-300 fill-yellow-300" />
               Rate This Response
             </DialogTitle>
           </div>
-          <p className="text-blue-100 text-sm">Your feedback helps us improve our responses</p>
+          <p className="text-blue-100 text-xs">Your feedback helps us improve our responses</p>
         </div>
         
         <div className="p-6">
@@ -980,7 +980,7 @@ export default function Component() {
                 </button>
               ))}
             </div>
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-xs text-gray-500 mt-2">
               {selectedRating === 0 
                 ? 'Tap to rate' 
                 : selectedRating <= 2 
@@ -995,7 +995,7 @@ export default function Component() {
           {selectedRating > 0 && (
             <div className="space-y-4 animate-fade-in">
               <div className="space-y-2">
-                <label htmlFor="feedback" className="block text-sm font-medium text-gray-700">
+                <label htmlFor="feedback" className="block text-xs font-medium text-gray-700">
                   {selectedRating <= 2 ? 'What can we improve?' : 'What did you like most?'}
                 </label>
                 <Textarea
@@ -1005,7 +1005,7 @@ export default function Component() {
                     : 'Share what you found helpful...'}
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
-                  className="min-h-[100px] border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
+                  className="min-h-[60px] sm:min-h-[100px] border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                 />
               </div>
               
@@ -1207,10 +1207,10 @@ export default function Component() {
 
         {/* Image Preview - Above input */}
         {imagePreview && (
-          <div className="fixed bottom-32 left-4 right-4 flex justify-center z-20">
+          <div className="fixed bottom-32 sm:bottom-32 left-4 right-4 flex justify-center z-20">
             <div className="relative">
               <div className="bg-white rounded-lg overflow-hidden shadow-lg">
-                <img src={imagePreview} alt="Upload preview" className="max-w-xs max-h-32 rounded-lg" />
+                <img src={imagePreview} alt="Upload preview" className="max-w-[200px] sm:max-w-xs max-h-24 sm:max-h-32 rounded-lg" />
               </div>
               <button
                 onClick={removeImage}
@@ -1267,7 +1267,7 @@ export default function Component() {
                       setCurrentFollowUps([]);
                     }
                   }}
-                  placeholder="Type your query here... (max 150 tokens)"
+                  placeholder="Type your query here..."
                   className="w-full px-4 py-3 text-xs sm:text-base bg-gray-200 border-gray-300 text-gray-800 placeholder-gray-500 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !isChatLoading) handleSend()
@@ -1299,7 +1299,7 @@ export default function Component() {
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-3 h-3 text-yellow-600 flex-shrink-0" />
                 <p className="text-xs text-yellow-800">
-                  <strong>Disclaimer:</strong> The ECHO agent is intended solely for informational and educational purposes. It is not a substitute for professional medical advice, diagnosis, or treatment.
+                  <strong>Disclaimer:</strong> For informational/educational purposes only. Not a substitute for professional medical advice.
                 </p>
               </div>
             </div>
