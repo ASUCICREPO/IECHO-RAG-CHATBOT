@@ -549,7 +549,7 @@ export default function Component() {
       let finalData: ChatResponse | null = null;
       const aiMessageId = `ai-${Date.now()}`;
       
-      // Add placeholder AI message
+      // Add placeholder AI message - this will hide the thinking animation
       setChatHistory(prev => [...prev, { 
         id: aiMessageId,
         sender: 'ai', 
@@ -1206,16 +1206,20 @@ export default function Component() {
                 </div>
               );
             })}
-            {isChatLoading && (
-              <div className="flex justify-start">
+            {isChatLoading && chatHistory.length > 0 && chatHistory[chatHistory.length - 1]?.sender === 'user' && (
+              <div className="flex justify-start items-start gap-3 mb-4">
+                <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
+                  <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
+                </Avatar>
                 <div className="bg-gray-100 p-3 rounded-lg max-w-[80%]">
                   <div className="flex items-center space-x-2">
                     <div className="w-2 h-2 rounded-full bg-blue-500 animate-bounce"></div>
-                    <span className="text-sm text-gray-600">{chatHistory.length === 0 || chatHistory[chatHistory.length - 1]?.sender === 'user' ? 'Thinking...' : 'Processing...'}</span>
+                    <span className="text-sm text-gray-600">Thinking...</span>
                   </div>
                 </div>
               </div>
             )}
+
             {chatError && (
               <div className="text-red-600 text-sm p-2 rounded bg-red-50">
                 {chatError}
