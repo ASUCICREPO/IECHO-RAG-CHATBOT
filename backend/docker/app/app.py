@@ -26,10 +26,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 from collections import defaultdict
-try:
-    import tiktoken
-except ImportError:
-    tiktoken = None
+
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -193,7 +190,7 @@ If image analysis results are provided in the query, use them as additional cont
 # Utilities
 # -----------------------------------------------------------------------------
 def count_tokens(text: str) -> int:
-    """Count tokens in text using tiktoken for Nova Lite model.
+    """Count tokens in text using AWS Nova approximation.
     
     Args:
         text: Input text to count tokens for
@@ -201,16 +198,8 @@ def count_tokens(text: str) -> int:
     Returns:
         Number of tokens in the text
     """
-    try:
-        if tiktoken:
-            # Use cl100k_base encoding which is compatible with most models
-            encoding = tiktoken.get_encoding("cl100k_base")
-            return len(encoding.encode(text))
-    except Exception as e:
-        logger.warning(f"Token counting failed: {e}")
-    
-    # Fallback to character-based estimation
-    return len(text) // 4
+    # AWS Nova: approximately 6 characters per token
+    return len(text) // 6
 
 def filter_thinking_tags(text: str) -> str:
     """Remove any model-inserted thinking tags if they appear in visible output."""

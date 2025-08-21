@@ -4,11 +4,10 @@ import { useState, useEffect, useMemo, useRef } from "react"
 import session from './utils/session'
 const { getOrCreateSessionId } = session;
 
-// Token counting function (approximates tiktoken cl100k_base)
+// Token counting function (AWS Nova approximation)
 function countTokens(text: string): number {
-  // Split by whitespace and punctuation to approximate tokenization
-  const tokens = text.split(/\s+|(?=[.,!?;:()\[\]{}"'`~@#$%^&*+=<>|\\/])|(?<=[.,!?;:()\[\]{}"'`~@#$%^&*+=<>|\\/])/).filter(t => t.trim());
-  return tokens.length;
+  // AWS Nova: approximately 6 characters per token
+  return Math.floor(text.length / 6);
 }
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -1294,7 +1293,7 @@ export default function Component() {
                   placeholder="Type your query here..."
                   className="w-full px-4 py-3 text-xs sm:text-base bg-gray-200 border-gray-300 text-gray-800 placeholder-gray-500 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !isChatLoading && countTokens(query) <= 150) handleSend()
+                    if (e.key === 'Enter' && !isChatLoading && query.length <= 900) handleSend()
                   }}
                   disabled={isChatLoading}
                 />
@@ -1303,7 +1302,7 @@ export default function Component() {
                 size="icon"
                 className="w-11 h-11 rounded-full bg-gray-400 hover:bg-blue-500 text-white flex-shrink-0 transition-colors"
                 onClick={() => handleSend()}
-                disabled={isChatLoading || !query.trim() || countTokens(query) > 150}
+                disabled={isChatLoading || !query.trim() || query.length > 900}
                 aria-label="Send message"
               >
                 {isChatLoading ? (
@@ -1317,11 +1316,11 @@ export default function Component() {
 
           </div>
           
-          {/* Token counter */}
+          {/* Character counter */}
           <div className="max-w-4xl mx-auto mt-1 mb-1">
             <div className="flex justify-between items-center px-2">
-              <span className="text-xs text-gray-500">Token usage</span>
-              <span className={`text-xs ${countTokens(query) > 150 ? 'text-red-500' : 'text-gray-500'}`}>{countTokens(query)}/150</span>
+              <span className="text-xs text-gray-500">Character count</span>
+              <span className={`text-xs ${query.length > 900 ? 'text-red-500' : 'text-gray-500'}`}>{query.length}/900</span>
             </div>
           </div>
           
