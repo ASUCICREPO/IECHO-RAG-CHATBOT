@@ -300,11 +300,11 @@ def build_specialists(conversation_history: List[str]):
     agri_citations: List[Dict] = []
     gen_citations: List[Dict] = []
 
-    # In-memory conversation manager
-    if SummarizingConversationManager is not None:
-        conv_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
-    elif SlidingWindowConversationManager is not None:
+    # In-memory conversation manager - prioritize SlidingWindow for medical/agricultural precision
+    if SlidingWindowConversationManager is not None:
         conv_mgr = SlidingWindowConversationManager(window_size=20, should_truncate_results=True)
+    elif SummarizingConversationManager is not None:
+        conv_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
     else:
         conv_mgr = None
 
@@ -516,11 +516,11 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     
     tools, get_last_citations, image_context = build_orchestrator_tools(history)
 
-    # Orchestrator conversation manager
-    if SummarizingConversationManager is not None:
-        orch_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
-    elif SlidingWindowConversationManager is not None:
+    # Orchestrator conversation manager - prioritize SlidingWindow for medical/agricultural precision
+    if SlidingWindowConversationManager is not None:
         orch_mgr = SlidingWindowConversationManager(window_size=20, should_truncate_results=True)
+    elif SummarizingConversationManager is not None:
+        orch_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
     else:
         orch_mgr = None
 
@@ -605,7 +605,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
         log_query = f"[IMAGE_PROVIDED] {query}"
     
     log_message = (
-        f"Chat complete - User id: {user_id}, Session id: {session_id}, Response id: {response_id}, "
+        f"Chat complete - User ID: {user_id}, Session ID: {session_id}, Response ID: {response_id}, "
         f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {log_query}, Response: {full_text}, "
         f"Citations: {json.dumps(citations) if citations else '[]'}"
     )
@@ -667,10 +667,10 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
     if temp_path:
         query = f"Image path: {temp_path}\n{query}"
 
-    if SummarizingConversationManager is not None:
-        orch_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
-    elif SlidingWindowConversationManager is not None:
+    if SlidingWindowConversationManager is not None:
         orch_mgr = SlidingWindowConversationManager(window_size=20, should_truncate_results=True)
+    elif SummarizingConversationManager is not None:
+        orch_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
     else:
         orch_mgr = None
 
@@ -757,7 +757,7 @@ async def chat(request: ChatRequest):
             log_query = f"[IMAGE_PROVIDED] {request.query}"
         
         log_message = (
-            f"Chat complete - User: {request.userId}, Session: {session_id}, Response: {response_id}, "
+            f"Chat complete - User: {request.userId}, Session ID: {session_id}, Response ID: {response_id}, "
             f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {log_query}, Response: {response_text}, "
             f"Citations: {json.dumps(citations) if citations else '[]'}"
         )
@@ -817,9 +817,9 @@ async def submit_feedback(request: FeedbackRequest):
         }
         table.put_item(Item=item)
 
-        log_message = (f"Feedback submitted - User: {request.userId}, Response: {request.responseId}, "
+        log_message = (f"Feedback submitted - User: {request.userId}, Response ID: {request.responseId}, "
                        f"Rating: {request.rating}, Feedback: {request.feedback or 'None'}, "
-                       f"FeedbackId: {item['feedbackId']}")
+                       f"Feedback ID: {item['feedbackId']}")
         logger.info(log_message)
         log_to_cloudwatch(log_message)
 
