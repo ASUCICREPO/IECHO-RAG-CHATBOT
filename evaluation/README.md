@@ -6,7 +6,7 @@ This directory contains scripts for evaluating the iECHO RAG chatbot system usin
 ## Files
 
 - `collect_model_dataset.py` - Generate model evaluation dataset from API responses
-- `load_test.py` - Load testing script for concurrent API requests  
+
 - `requirements.txt` - Python dependencies
 - `model_evaluation_dataset.jsonl` - Generated evaluation dataset (example)
 
@@ -50,23 +50,6 @@ TEST_PROMPTS = {
 }
 ```
 
-### Load Testing
-
-```bash
-# Default: 10 concurrent, 50 total requests
-python load_test.py
-
-# Custom parameters
-python load_test.py --concurrent 20 --total 100
-python load_test.py -c 5 -t 25
-```
-
-**Metrics:**
-- Requests per second
-- Success/failure rates  
-- Response time statistics
-- Error analysis
-
 ## Bedrock Evaluation
 
 1. Upload generated `model_evaluation_dataset.jsonl` to S3
@@ -91,6 +74,4 @@ python load_test.py -c 5 -t 25
 ## Performance Expectations
 
 - **Response Time**: 3-7 seconds per request
-- **Concurrent Load**: Handles 10+ concurrent requests
-- **Success Rate**: >95% under normal load
 - **Evaluation Metrics**: Correctness, Helpfulness, Completeness
