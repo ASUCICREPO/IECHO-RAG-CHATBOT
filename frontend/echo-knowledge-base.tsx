@@ -3,6 +3,12 @@
 import { useState, useEffect, useMemo, useRef } from "react"
 import session from './utils/session'
 const { getOrCreateSessionId } = session;
+
+// Token counting function (AWS Nova approximation)
+function countTokens(text: string): number {
+  // AWS Nova: approximately 6 characters per token
+  return Math.floor(text.length / 6);
+}
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -13,6 +19,8 @@ import {
   Globe, 
   Heart, 
   Home, 
+  ImagePlus,
+  Lightbulb,
   MessageSquare, 
   Mic, 
   MoreVertical, 
@@ -27,7 +35,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 
 const questionCards = [
-  "What causes TB - bacterial, viral or both?",
+  "What causes TB?",
   "What are the main symptoms of pulmonary TB?",
   "What is Ni-Kshay used for?",
   "How to improve crop irrigation efficiency?",
@@ -38,7 +46,6 @@ const questionCards = [
 interface Citation {
   title: string;
   source: string;
-  excerpt: string;
 }
 
 interface ApiError {
@@ -53,6 +60,7 @@ interface ChatResponse {
   sessionId: string;
   responseId: string;
   userId: string;
+  followUpQuestions?: string[];
 }
 
 interface ChatMessage {
@@ -62,6 +70,8 @@ interface ChatMessage {
   responseId?: string;
   citations?: Citation[];
   error?: boolean;
+  followUpQuestions?: string[];
+  image?: string; // Base64 image data
 }
 
 function CitationList({ citations }: { citations: Citation[] }) {
@@ -83,52 +93,35 @@ function CitationList({ citations }: { citations: Citation[] }) {
         <div className="mt-2 space-y-1.5">
           {citations.map((cite, i) => (
             <div key={i} className="p-2 bg-gray-50 border border-gray-200 rounded text-xs">
-              <div className="font-medium text-gray-800 mb-1">
-                {cite.title.replace(/^#+\s*/, '').replace(/##\s*/g, ' - ')}
-              </div>
-              <div className="mb-1">
-                {cite.source.startsWith('s3://') ? (
-                  <button 
-                    onClick={async () => {
-                      try {
-                        const encodedPath = encodeURIComponent(cite.source);
-                        const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/document-url/${encodedPath}`);
-                        if (!response.ok) {
-                          throw new Error(`HTTP ${response.status}`);
-                        }
-                        const data = await response.json();
-                        if (data.url) {
-                          window.open(data.url, '_blank');
-                        } else {
-                          alert('Document URL not available');
-                        }
-                      } catch (error) {
-                        console.error('Failed to get document URL:', error);
-                        alert('Failed to open document');
+              {cite.source.startsWith('s3://') ? (
+                <button 
+                  onClick={async () => {
+                    try {
+                      const encodedPath = encodeURIComponent(cite.source);
+                      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/document-url/${encodedPath}`);
+                      if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
                       }
-                    }}
-                    className="text-left text-blue-700 hover:text-blue-900 hover:bg-blue-100 px-1 py-0.5 rounded transition-colors text-xs font-medium break-words"
-                  >
-                    📄 {cite.source.split('/').pop()?.replace('.pdf', '') || cite.source}
-                  </button>
-                ) : (
-                  <span className="text-gray-600 text-xs break-words">
-                    📄 {cite.source}
-                  </span>
-                )}
-              </div>
-              <div className="text-xs text-gray-600 leading-relaxed">
-                {(() => {
-                  const cleanExcerpt = cite.excerpt
-                    .replace(/^#+\s*/gm, '')
-                    .replace(/\*\*(.*?)\*\*/g, '$1')
-                    .replace(/\*(.*?)\*/g, '$1')
-                    .replace(/##\s*/g, ' - ')
-                    .trim();
-                  return cleanExcerpt.length > 200 ? cleanExcerpt.substring(0, 200) + '...' : cleanExcerpt;
-                })()
-                }
-              </div>
+                      const data = await response.json();
+                      if (data.url) {
+                        window.open(data.url, '_blank');
+                      } else {
+                        alert('Document URL not available');
+                      }
+                    } catch (error) {
+                      console.error('Failed to get document URL:', error);
+                      alert('Failed to open document');
+                    }
+                  }}
+                  className="text-left text-blue-700 hover:text-blue-900 hover:bg-blue-100 px-1 py-0.5 rounded transition-colors text-xs font-medium break-words"
+                >
+                  📄 {cite.source.split('/').pop()?.replace('.pdf', '') || cite.source}
+                </button>
+              ) : (
+                <span className="text-gray-600 text-xs break-words">
+                  📄 {cite.source}
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -137,66 +130,104 @@ function CitationList({ citations }: { citations: Citation[] }) {
   );
 }
 
-function ChatMessage({ message, onRate }: { message: ChatMessage, onRate: () => void }) {
+function ChatMessage({ message, onRate, onFollowUpClick }: { 
+  message: ChatMessage, 
+  onRate: () => void,
+  onFollowUpClick?: (question: string) => void 
+}) {
   return (
     <>
       <div className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-4 items-start gap-3`}>
-      {/* Chatbot Avatar - Left side */}
-      {message.sender === 'ai' && (
-        <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
-          <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
-        </Avatar>
-      )}
-      
-      <div className={`max-w-[80%] p-2 sm:p-3 rounded-lg ${
-        message.sender === 'user' 
-          ? 'bg-blue-600 text-white' 
-          : 'bg-white text-gray-800 border border-gray-200'
-      }`}>
-        <div className="whitespace-pre-wrap text-xs sm:text-base">
-          {message.sender === 'ai' ? (
-            <div dangerouslySetInnerHTML={{
-              __html: message.text
-                // Headers
-                .replace(/^### (.*$)/gm, '<h3 class="text-sm sm:text-lg font-semibold mt-2 sm:mt-3 mb-1 sm:mb-2">$1</h3>')
-                .replace(/^## (.*$)/gm, '<h2 class="text-base sm:text-xl font-semibold mt-2 sm:mt-4 mb-1 sm:mb-2">$1</h2>')
-                .replace(/^# (.*$)/gm, '<h1 class="text-lg sm:text-2xl font-bold mt-2 sm:mt-4 mb-2 sm:mb-3">$1</h1>')
-                // Bold and italic
-                .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
-                .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
-                // Code
-                .replace(/`(.*?)`/g, '<code class="bg-gray-200 px-1 rounded text-xs sm:text-sm font-mono">$1</code>')
-                // Lists
-                .replace(/^\* (.*$)/gm, '<li class="ml-3 sm:ml-4 list-disc">$1</li>')
-                .replace(/^- (.*$)/gm, '<li class="ml-3 sm:ml-4 list-disc">$1</li>')
-                .replace(/^\d+\. (.*$)/gm, '<li class="ml-3 sm:ml-4 list-decimal">$1</li>')
-                // Links
-                .replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" class="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">$1</a>')
-                // Line breaks
-                .replace(/\n/g, '<br>')
-            }} />
-          ) : (
-            message.text
-          )}
-        </div>
-        
-        {/* Citations */}
-        {message.sender === 'ai' && message.citations && message.citations.length > 0 && (
-          <div className="mt-2">
-            <CitationList citations={message.citations} />
-          </div>
+        {/* Chatbot Avatar - Left side */}
+        {message.sender === 'ai' && (
+          <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
+            <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
+          </Avatar>
         )}
         
-
+        <div className="max-w-[80%] space-y-2">
+          {/* Image box above query */}
+          {message.image && (
+            <div className="w-48 h-32 md:w-64 md:h-48 rounded-lg overflow-hidden bg-gray-100">
+              <img 
+                src={`data:image/jpeg;base64,${message.image}`} 
+                alt="Uploaded image" 
+                className="w-full h-full object-cover rounded-lg" 
+              />
+            </div>
+          )}
+          
+          {/* Message text box */}
+          <div className={`p-2 sm:p-3 rounded-lg ${
+            message.sender === 'user' 
+              ? 'bg-blue-600 text-white' 
+              : 'bg-white text-gray-800 border border-gray-200'
+          }`}>
+            <div className="whitespace-pre-wrap text-xs sm:text-base">
+              {message.sender === 'ai' ? (
+                <div dangerouslySetInnerHTML={{
+                  __html: message.text
+                    // Headers
+                    .replace(/^### (.*$)/gm, '<h3 class="text-sm sm:text-lg font-semibold mt-2 sm:mt-3 mb-1 sm:mb-2">$1</h3>')
+                    .replace(/^## (.*$)/gm, '<h2 class="text-base sm:text-xl font-semibold mt-2 sm:mt-4 mb-1 sm:mb-2">$1</h2>')
+                    .replace(/^# (.*$)/gm, '<h1 class="text-lg sm:text-2xl font-bold mt-2 sm:mt-4 mb-2 sm:mb-3">$1</h1>')
+                    // Bold and italic
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
+                    .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+                    // Code
+                    .replace(/`(.*?)`/g, '<code class="bg-gray-200 px-1 rounded text-xs sm:text-sm font-mono">$1</code>')
+                    // Lists
+                    .replace(/^\* (.*$)/gm, '<li class="ml-3 sm:ml-4 list-disc">$1</li>')
+                    .replace(/^- (.*$)/gm, '<li class="ml-3 sm:ml-4 list-disc">$1</li>')
+                    .replace(/^\d+\. (.*$)/gm, '<li class="ml-3 sm:ml-4 list-decimal">$1</li>')
+                    // Links
+                    .replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" class="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">$1</a>')
+                    // Line breaks
+                    .replace(/\n/g, '<br>')
+                }} />
+              ) : (
+                message.text
+              )}
+            </div>
+            
+            {/* Citations */}
+            {message.sender === 'ai' && message.citations && message.citations.length > 0 && (
+              <div className="mt-2">
+                <CitationList citations={message.citations} />
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* User Avatar - Right side */}
+        {message.sender === 'user' && (
+          <Avatar className="w-8 h-8 bg-blue-600 text-white flex-shrink-0">
+            <AvatarFallback className="bg-blue-600 text-white font-bold">U</AvatarFallback>
+          </Avatar>
+        )}
       </div>
       
-      {/* User Avatar - Right side */}
-      {message.sender === 'user' && (
-        <Avatar className="w-8 h-8 bg-blue-600 text-white flex-shrink-0">
-          <AvatarFallback className="bg-blue-600 text-white font-bold">U</AvatarFallback>
-        </Avatar>
+      {/* Follow-up Questions - Only show for the latest AI message */}
+      {message.sender === 'ai' && message.followUpQuestions && message.followUpQuestions.length > 0 && onFollowUpClick && (
+        <div className="max-w-[80%] ml-11 mb-4 space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Lightbulb className="w-4 h-4 text-blue-600" />
+            <span className="text-blue-600 font-medium text-sm">Follow-up questions:</span>
+          </div>
+          <div className="space-y-2">
+            {message.followUpQuestions.map((question, index) => (
+              <button
+                key={index}
+                className="w-full text-left p-1.5 sm:p-2 bg-white border border-blue-200 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors duration-200 flex items-start gap-2"
+                onClick={() => onFollowUpClick(question)}
+              >
+                <ArrowRight className="w-3 h-3 sm:w-4 sm:h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                <span className="text-xs sm:text-sm leading-tight break-all">{question}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
-      </div>
       
       {/* Feedback Button - Below the message box */}
       {message.sender === 'ai' && message.responseId && (
@@ -286,6 +317,10 @@ export default function Component() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showQuickStart, setShowQuickStart] = useState(true);
+  const [currentFollowUps, setCurrentFollowUps] = useState<string[]>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isImageUploading, setIsImageUploading] = useState<boolean>(false);
   
   // Auto-scroll to bottom when new messages arrive or during streaming
   useEffect(() => {
@@ -443,8 +478,16 @@ export default function Component() {
     const textToSend = messageText || query.trim();
     if (!textToSend || isChatLoading) return;
     
+
+    
     setIsChatLoading(true);
     setChatError(null);
+    
+    // Clear follow-up questions when user starts typing a new message
+    setCurrentFollowUps([]);
+    
+    // Hide quick start when user sends a message
+    setShowQuickStart(false);
     
     const userMessage = textToSend;
     const userMessageId = `user-${Date.now()}`;
@@ -453,10 +496,17 @@ export default function Component() {
     setChatHistory(prev => [...prev, { 
       id: userMessageId,
       sender: 'user', 
-      text: userMessage 
+      text: userMessage,
+      image: selectedImage || undefined
     }]);
     
-    if (!messageText) setQuery("");
+    if (!messageText) {
+      setQuery("");
+    }
+    // Always clear image after sending
+    setSelectedImage(null);
+    setImagePreview(null);
+    setIsImageUploading(false);
 
     try {
       // Create a controller for the fetch request to support timeout
@@ -471,7 +521,8 @@ export default function Component() {
         body: JSON.stringify({ 
           query: userMessage, 
           userId: 'api-user',
-          sessionId: getOrCreateSessionId()
+          sessionId: getOrCreateSessionId(),
+          image: selectedImage
         }),
         signal: controller.signal
       });
@@ -479,7 +530,15 @@ export default function Component() {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // Try to get the error message from the response
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch (parseError) {
+          // If JSON parsing fails, use the status-based message
+        }
+        throw new Error(errorMessage);
       }
       
       const reader = response.body!.getReader();
@@ -489,7 +548,7 @@ export default function Component() {
       let finalData: ChatResponse | null = null;
       const aiMessageId = `ai-${Date.now()}`;
       
-      // Add placeholder AI message
+      // Add placeholder AI message - this will hide the thinking animation
       setChatHistory(prev => [...prev, { 
         id: aiMessageId,
         sender: 'ai', 
@@ -535,13 +594,20 @@ export default function Component() {
 
       if (finalData) {
         setLatestResponseId(finalData.responseId);
+        
+        // Update current follow-ups
+        if (finalData.followUpQuestions && finalData.followUpQuestions.length > 0) {
+          setCurrentFollowUps(finalData.followUpQuestions);
+        }
+        
         setChatHistory(prev => prev.map(msg => 
           msg.id === aiMessageId 
             ? { 
                 ...msg, 
                 text: finalData.response,
                 responseId: finalData.responseId,
-                citations: finalData.citations || []
+                citations: finalData.citations || [],
+                followUpQuestions: finalData.followUpQuestions || []
               }
             : msg
         ));
@@ -550,21 +616,61 @@ export default function Component() {
     } catch (error) {
       console.error('Chat error:', error);
       
-      const errorMessage = error instanceof Error ? 
-        error.message : 'Failed to get response from the chatbot. Please try again.';
+      let errorMessage = 'Failed to get response from the chatbot. Please try again.';
       
-      setChatHistory(prev => [...prev, { 
-        id: `error-${Date.now()}`,
-        sender: 'ai', 
-        text: `Error: ${errorMessage}`,
-        error: true
-      }]);
+      if (error instanceof Error) {
+        // Clean up error message - remove technical prefixes
+        errorMessage = error.message
+          .replace(/^Internal server error: \d+: /, '')
+          .replace(/^HTTP error! status: \d+/, 'Connection error');
+      }
       
       setChatError(errorMessage);
     } finally {
       setIsChatLoading(false);
     }
   }
+
+  const handleFollowUpClick = (question: string) => {
+    // Clear current follow-ups when a follow-up is clicked
+    setCurrentFollowUps([]);
+    // Send the follow-up question
+    handleSend(question);
+  };
+
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      setIsImageUploading(true);
+      // Clear follow-up questions when new image is uploaded
+      setCurrentFollowUps([]);
+      // Clear follow-up questions from chat history
+      setChatHistory(prev => prev.map(msg => 
+        msg.sender === 'ai' ? { ...msg, followUpQuestions: [] } : msg
+      ));
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        setImagePreview(result);
+        // Convert to base64 without data URL prefix
+        const base64 = result.split(',')[1];
+        setSelectedImage(base64);
+        // Keep animation for at least 1 second
+        setTimeout(() => {
+          setIsImageUploading(false);
+        }, 1000);
+      };
+      reader.readAsDataURL(file);
+    }
+    // Reset input value to allow re-uploading same file
+    event.target.value = '';
+  };
+
+  const removeImage = () => {
+    setSelectedImage(null);
+    setImagePreview(null);
+    setIsImageUploading(false);
+  };
 
 
 
@@ -845,24 +951,16 @@ export default function Component() {
         setShowRatingDialog(true);
       }
     }}>
-      <DialogContent className="bg-white rounded-xl border-0 shadow-2xl p-0 overflow-hidden w-full max-w-md">
+      <DialogContent className="bg-white rounded-xl border-0 shadow-2xl p-0 overflow-hidden w-[90vw] max-w-md">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-blue-500 p-6 text-white">
           <div className="flex justify-between items-center mb-2">
-            <DialogTitle className="text-xl font-bold flex items-center gap-2">
-              <Star className="w-5 h-5 text-yellow-300 fill-yellow-300" />
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Star className="w-4 h-4 text-yellow-300 fill-yellow-300" />
               Rate This Response
             </DialogTitle>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="text-white/80 hover:bg-white/10 rounded-full h-8 w-8"
-              onClick={() => setShowRatingDialog(false)}
-            >
-              <X className="w-4 h-4" />
-            </Button>
           </div>
-          <p className="text-blue-100 text-sm">Your feedback helps us improve our responses</p>
+          <p className="text-blue-100 text-xs">Your feedback helps us improve our responses</p>
         </div>
         
         <div className="p-6">
@@ -888,7 +986,7 @@ export default function Component() {
                 </button>
               ))}
             </div>
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-xs text-gray-500 mt-2">
               {selectedRating === 0 
                 ? 'Tap to rate' 
                 : selectedRating <= 2 
@@ -903,7 +1001,7 @@ export default function Component() {
           {selectedRating > 0 && (
             <div className="space-y-4 animate-fade-in">
               <div className="space-y-2">
-                <label htmlFor="feedback" className="block text-sm font-medium text-gray-700">
+                <label htmlFor="feedback" className="block text-xs font-medium text-gray-700">
                   {selectedRating <= 2 ? 'What can we improve?' : 'What did you like most?'}
                 </label>
                 <Textarea
@@ -913,7 +1011,7 @@ export default function Component() {
                     : 'Share what you found helpful...'}
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
-                  className="min-h-[100px] border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
+                  className="min-h-[60px] sm:min-h-[100px] border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                 />
               </div>
               
@@ -988,12 +1086,28 @@ export default function Component() {
       <header className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
-            <div className="flex items-center">
+            <div className="flex items-center gap-3">
               <img
                 src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-QuV3bpvNh9r2l0UYMmNrFvG1GotwpE.png"
                 alt="ECHO India Project ECHO logo"
                 className="h-10 w-auto"
               />
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => {
+                  setChatHistory([]);
+                  setQuery('');
+                  setShowQuickStart(true);
+                  setCurrentFollowUps([]);
+                  setChatError(null);
+                  setLatestResponseId(null);
+                }}
+                className="text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                title="Reset to home"
+              >
+                <Home className="w-5 h-5" />
+              </Button>
             </div>
             <div className="flex items-center space-x-4">
               <DropdownMenu>
@@ -1017,18 +1131,33 @@ export default function Component() {
       </header>
 
       <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-2 sm:py-4 overflow-y-auto pb-32">
+        {/* Disclaimer - Fixed at top of scroll area */}
+        <div className="sticky top-0 z-10 pt-0 pb-2">
+          <div className="max-w-4xl mx-auto px-2 sm:px-6">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-0.5 py-1.5 sm:p-1.5">
+              <div className="flex justify-center">
+                <p className="text-[10px] sm:text-xs text-yellow-800 text-center">
+                  ⚠️ For informational purposes only. Not a substitute for professional medical advice.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
         {/* Chat Area */}
-        <div className="p-3 sm:p-6 mx-2 sm:mx-4">
+        <div className="p-2 sm:p-6 mx-1 sm:mx-4">
           {/* Banner positioned like chat messages */}
           <div className="flex items-start gap-3 mb-4">
             <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
               <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
             </Avatar>
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-2 sm:p-3 flex-1">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-1.5 sm:p-3 flex-1">
               <h1 className="text-sm sm:text-lg font-bold text-[#101828] dark:text-white mb-1 sm:mb-2">iECHO AI Assistant</h1>
               <p className="text-xs sm:text-base text-[#4a5565] dark:text-gray-300">Hello! 👋 I'm your iECHO AI assistant, ready to help with TB management and agriculture questions. I can educate you about TB treatment, NTEP guidelines, Nikshay system, and sustainable farming practices.</p>
             </div>
           </div>
+
+
 
           {/* Question Cards */}
           {showQuickStart && (
@@ -1036,49 +1165,60 @@ export default function Component() {
               <h2 className="text-sm sm:text-xl font-semibold text-gray-800 dark:text-white mb-1">Quick Start</h2>
               <div className="grid md:grid-cols-2 gap-1 sm:gap-2">
                 {questionCards.map((question, index) => (
-                  <Button
+                  <button
                     key={index}
-                    variant="outline"
-                    className="justify-start text-left h-auto p-2 sm:p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-normal rounded-lg transition-colors duration-200"
+                    className="w-full justify-start text-left h-auto p-1.5 sm:p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-normal rounded-lg transition-colors duration-200 flex items-start gap-2"
                     onClick={() => {
                       setShowQuickStart(false);
                       handleSend(question);
                     }}
                   >
-                    <div className="flex items-start gap-2">
-                      <MessageSquare className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
-                      <span className="text-xs sm:text-sm leading-relaxed break-words">{question}</span>
-                    </div>
-                  </Button>
+                    <MessageSquare className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
+                    <span className="text-xs sm:text-sm leading-relaxed break-all">{question}</span>
+                  </button>
                 ))}
               </div>
             </div>
           )}
 
           {/* Show chat messages */}
-          <div className="flex-1 overflow-y-auto space-y-4 pb-16">
-            {chatHistory.map((message) => (
-              <div key={message.id} className="relative">
-                <ChatMessage 
-                  message={message} 
-                  onRate={() => {
-                    setSelectedMessageId(message.id);
-                    setShowRatingDialog(true);
-                  }} 
-                />
-              </div>
-            ))}
-            {isChatLoading && (
-              <div className="flex justify-start">
+          <div className="flex-1 overflow-y-auto space-y-4 pb-24">
+            {chatHistory.map((message, index) => {
+              // Only show follow-up questions for the latest AI message
+              const isLatestAiMessage = message.sender === 'ai' && 
+                index === chatHistory.length - 1 && 
+                !isChatLoading;
+              
+              return (
+                <div key={message.id} className="relative">
+                  <ChatMessage 
+                    message={{
+                      ...message,
+                      followUpQuestions: isLatestAiMessage ? message.followUpQuestions : undefined
+                    }} 
+                    onRate={() => {
+                      setSelectedMessageId(message.id);
+                      setShowRatingDialog(true);
+                    }}
+                    onFollowUpClick={isLatestAiMessage ? handleFollowUpClick : undefined}
+                  />
+                </div>
+              );
+            })}
+            {isChatLoading && chatHistory.length > 0 && chatHistory[chatHistory.length - 1]?.sender === 'user' && (
+              <div className="flex justify-start items-start gap-3 mb-4">
+                <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
+                  <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
+                </Avatar>
                 <div className="bg-gray-100 p-3 rounded-lg max-w-[80%]">
-                  <div className="flex space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce"></div>
-                    <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-bounce"></div>
+                    <span className="text-sm text-gray-600">Thinking...</span>
                   </div>
                 </div>
               </div>
             )}
+
             {chatError && (
               <div className="text-red-600 text-sm p-2 rounded bg-red-50">
                 {chatError}
@@ -1088,27 +1228,81 @@ export default function Component() {
           </div>
         </div>
 
+        {/* Image Preview - Above input */}
+        {imagePreview && (
+          <div className="fixed bottom-32 sm:bottom-32 left-4 right-4 flex justify-center z-20">
+            <div className="relative">
+              <div className="bg-white rounded-lg overflow-hidden shadow-lg">
+                <img src={imagePreview} alt="Upload preview" className="max-w-[200px] sm:max-w-xs max-h-24 sm:max-h-32 rounded-lg" />
+              </div>
+              <button
+                onClick={removeImage}
+                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+        
+
+        
+
+
         {/* Input Field - Fixed at bottom */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-4">
+        <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-2 sm:p-4">
+          {/* Upload Animation above chat bar */}
+          {isImageUploading && (
+            <div className="max-w-4xl mx-auto mb-2">
+              <div className="w-full bg-blue-400 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-full flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-white animate-bounce"></div>
+                <span className="text-sm">Uploading...</span>
+              </div>
+            </div>
+          )}
           <div className="max-w-4xl mx-auto">
             <div className="flex items-center gap-3">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+                id="image-upload"
+                disabled={isChatLoading}
+              />
+              <label
+                htmlFor="image-upload"
+                className={`w-11 h-11 flex items-center justify-center flex-shrink-0 rounded-full transition-colors ${
+                  isChatLoading 
+                    ? 'text-gray-300 cursor-not-allowed' 
+                    : 'text-gray-500 hover:text-blue-600 hover:bg-blue-100 cursor-pointer'
+                }`}
+              >
+                <ImagePlus className="w-5 h-5" />
+              </label>
               <div className="relative flex-1">
                 <Input
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    // Clear follow-ups when user starts typing
+                    if (e.target.value.trim() && currentFollowUps.length > 0) {
+                      setCurrentFollowUps([]);
+                    }
+                  }}
                   placeholder="Type your query here..."
                   className="w-full px-4 py-3 text-xs sm:text-base bg-gray-200 border-gray-300 text-gray-800 placeholder-gray-500 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !isChatLoading) handleSend()
+                    if (e.key === 'Enter' && !isChatLoading && query.length <= 900) handleSend()
                   }}
                   disabled={isChatLoading}
                 />
               </div>
               <Button
                 size="icon"
-                className="w-11 h-11 rounded-full bg-gray-400 hover:bg-gray-500 text-white flex-shrink-0"
+                className="w-11 h-11 rounded-full bg-gray-400 hover:bg-blue-500 text-white flex-shrink-0 transition-colors"
                 onClick={() => handleSend()}
-                disabled={isChatLoading || !query.trim()}
+                disabled={isChatLoading || !query.trim() || query.length > 900}
                 aria-label="Send message"
               >
                 {isChatLoading ? (
@@ -1118,7 +1312,19 @@ export default function Component() {
                 )}
               </Button>
             </div>
+            
+
           </div>
+          
+          {/* Character counter */}
+          <div className="max-w-4xl mx-auto mt-1 mb-1">
+            <div className="flex justify-between items-center px-2">
+              <span className="text-xs text-gray-500">Character count</span>
+              <span className={`text-xs ${query.length > 900 ? 'text-red-500' : 'text-gray-500'}`}>{query.length}/900</span>
+            </div>
+          </div>
+          
+
         </div>
       </main>
     </div>

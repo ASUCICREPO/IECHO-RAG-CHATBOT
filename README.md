@@ -26,25 +26,68 @@ Your AWS user/role needs permissions for:
 - Bedrock (InvokeModel, RetrieveAndGenerate)
 - ECR, IAM, SSM
 
-## Deployment Steps
+## Complete Deployment Guide
 
-### 1. Create Knowledge Base (Manual)
+### Step 1: Prerequisites Setup
+
+1. **Install Required Tools**:
+   ```bash
+   # Install AWS CLI
+   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+   unzip awscliv2.zip
+   sudo ./aws/install
+   
+   # Install Node.js 18+
+   # Download from https://nodejs.org/
+   
+   # Install CDK CLI
+   npm install -g aws-cdk
+   
+   # Install Docker
+   # Follow instructions at https://docs.docker.com/get-docker/
+   ```
+
+2. **Configure AWS CLI**:
+   ```bash
+   aws configure
+   # Enter your AWS Access Key ID, Secret Access Key, Region, and Output format
+   ```
+
+3. **Verify Prerequisites**:
+   ```bash
+   aws --version
+   node --version
+   npm --version
+   cdk --version
+   docker --version
+   ```
+
+### Step 2: Create Knowledge Base (Manual)
 
 #### Step 1: Create S3 Bucket and Upload Documents
 
 1. Create S3 bucket: `s3-iecho-documents`
 2. Create folder structure:
    ```
-   processed/
-   ├── TB/
-   │   ├── Unit 1 Introduction.pdf
-   │   ├── Unit 2 TB Epidemiology.pdf
-   │   └── ...
-   └── agriculture/
-       ├── Water Management.pdf
-       └── ...
+   s3-iecho-documents/
+   ├── uploads/
+   │   ├── TB_documents.pdf
+   │   ├── Agriculture_guides.pdf
+   │   └── ... (raw uploaded files)
+   └── processed/
+       ├── TB_documents.pdf
+       ├── Agriculture_guides.pdf
+       └── ... (processed files for Knowledge Base)
    ```
-3. Upload your documents to respective folders
+
+3. **Supported File Formats**:
+   - PDF files (.pdf) - copied directly to processed folder
+   - Microsoft Word (.docx) - converted to PDF
+   - Microsoft Excel (.xlsx) - converted to PDF  
+   - Microsoft PowerPoint (.pptx) - converted to PDF
+
+4. Upload your documents to the `uploads/` folder
+5. Files are automatically processed and moved to `processed/` folder for Knowledge Base ingestion
 
 #### Step 2: Create S3 Vector Store Bucket
 
@@ -64,10 +107,10 @@ Your AWS user/role needs permissions for:
 4. **Data Source Configuration**:
    - **Data source name**: `iecho-documents`
    - **S3 URI**: `s3://s3-iecho-documents/processed/`
-   - **Chunking strategy**: Default chunking
+   - **Chunking strategy**: Hierarchical chunking
 
 5. **Embeddings Model**:
-   - **Embeddings model**: Amazon Titan Text Embeddings v2
+   - **Embeddings model**: Amazon Titan Text Embeddings G1 - Text
 
 6. **Vector Database**:
    - **Vector database**: Amazon S3
@@ -79,12 +122,32 @@ Your AWS user/role needs permissions for:
 8. **Sync Data Source** after creation (this may take several minutes)
 9. **Note down the Knowledge Base ID** from the details page
 
-### 2. Deploy Infrastructure
+### Step 3: Clone and Setup Project
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd iECHO-RAG-CHATBOT/backend
+# Clone the repository
+git clone <your-repository-url>
+cd iECHO-RAG-CHATBOT
+
+# Navigate to backend
+cd backend
+
+# Install dependencies
+npm install
+```
+
+### Step 4: Bootstrap CDK (First Time Only)
+
+```bash
+# Bootstrap CDK in your AWS account and region
+cdk bootstrap
+```
+
+### Step 5: Deploy Infrastructure
+
+```bash
+# Navigate to backend
+cd backend
 
 # Install dependencies
 npm install
@@ -92,18 +155,28 @@ npm install
 # Bootstrap CDK (first time only)
 cdk bootstrap
 
-# Deploy with your Knowledge Base ID
+# Deploy with Knowledge Base ID (required)
 cdk deploy -c knowledgeBaseId=YOUR_KNOWLEDGE_BASE_ID
+
+# Deploy with office-to-PDF processor (optional)
+cdk deploy -c knowledgeBaseId=YOUR_KNOWLEDGE_BASE_ID -c documentsBucketName=s3-iecho-documents
 
 # Or add to cdk.json:
 # {
 #   "context": {
-#     "knowledgeBaseId": "YOUR_KNOWLEDGE_BASE_ID"
+#     "knowledgeBaseId": "YOUR_KNOWLEDGE_BASE_ID",
+#     "documentsBucketName": "s3-iecho-documents"
 #   }
 # }
 ```
 
-### 3. Get API Endpoint
+**Office-to-PDF Processor** (when `documentsBucketName` is provided):
+- Converts .docx, .xlsx, .pptx files to PDF when uploaded to `uploads/`
+- Copies .pdf files directly to `processed/` folder (no conversion needed)
+- Moves all processed files to `processed/` folder for Knowledge Base ingestion
+- Deletes original files after processing
+
+### Step 6: Get API Endpoint
 
 After deployment, note the `ApiGatewayUrl` from CDK outputs:
 ```
@@ -111,7 +184,7 @@ Outputs:
 AgentEksFargateStack.ApiGatewayUrl = https://xxxxxxxxxx.execute-api.us-west-2.amazonaws.com/prod/
 ```
 
-### 4. Test Deployment
+### Step 7: Test Deployment
 
 ```bash
 # Health check
@@ -155,6 +228,34 @@ curl -X POST https://your-api-gateway-url/feedback \
     "responseId": "unique-response-uuid",
     "rating": 5,
     "feedback": "Great response!"
+  }'
+```
+
+### Step 8: Upload Documents to Knowledge Base
+
+```bash
+# Upload documents to the uploads folder
+aws s3 cp your-document.pdf s3://s3-iecho-documents/uploads/
+aws s3 cp your-presentation.pptx s3://s3-iecho-documents/uploads/
+aws s3 cp your-spreadsheet.xlsx s3://s3-iecho-documents/uploads/
+
+# Check processed files
+aws s3 ls s3://s3-iecho-documents/processed/
+
+# Sync Knowledge Base data source
+# Go to AWS Bedrock Console → Knowledge Bases → Your KB → Data Sources → Sync
+```
+
+### Step 9: Verify Complete Setup
+
+```bash
+# Test the complete workflow
+curl -X POST https://your-api-gateway-url/chat-stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What are the main symptoms of tuberculosis?",
+    "userId": "test-user-123",
+    "sessionId": "session-456"
   }'
 ```
 
