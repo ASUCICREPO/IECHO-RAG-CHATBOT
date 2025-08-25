@@ -196,6 +196,13 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
                 <CitationList citations={message.citations} />
               </div>
             )}
+            
+            {/* Disclaimer for AI messages */}
+            {message.sender === 'ai' && (
+              <div className="flex justify-end mt-1">
+                <span className="text-[10px] text-gray-400">Chatbot can make mistakes. Please double-check responses.</span>
+              </div>
+            )}
           </div>
         </div>
         
@@ -1130,14 +1137,14 @@ export default function Component() {
         </div>
       </header>
 
-      <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-2 sm:py-4 overflow-y-auto pb-32">
+      <main ref={scrollContainerRef} className="flex-1 bg-gray-50 dark:bg-gray-900 py-1 sm:py-4 overflow-y-auto pb-28 sm:pb-32">
         {/* Disclaimer - Fixed at top of scroll area */}
         <div className="sticky top-0 z-10 pt-0 pb-2">
           <div className="max-w-4xl mx-auto px-2 sm:px-6">
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-0.5 py-1.5 sm:p-1.5">
               <div className="flex justify-center">
                 <p className="text-[10px] sm:text-xs text-yellow-800 text-center">
-                  ⚠️ For informational purposes only. Not a substitute for professional medical advice.
+                  ⚠️ For informational purposes only. Not a substitute for professional advice.
                 </p>
               </div>
             </div>
@@ -1145,13 +1152,13 @@ export default function Component() {
         </div>
         
         {/* Chat Area */}
-        <div className="p-2 sm:p-6 mx-1 sm:mx-4">
+        <div className="p-1 sm:p-6 mx-1 sm:mx-4">
           {/* Banner positioned like chat messages */}
-          <div className="flex items-start gap-3 mb-4">
+          <div className="flex items-start gap-2 sm:gap-3 mb-2 sm:mb-4">
             <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
               <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
             </Avatar>
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-1.5 sm:p-3 flex-1">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-2 sm:p-3 flex-1">
               <h1 className="text-sm sm:text-lg font-bold text-[#101828] dark:text-white mb-1 sm:mb-2">iECHO AI Assistant</h1>
               <p className="text-xs sm:text-base text-[#4a5565] dark:text-gray-300">Hello! 👋 I'm your iECHO AI assistant, ready to help with TB management and agriculture questions. I can educate you about TB treatment, NTEP guidelines, Nikshay system, and sustainable farming practices.</p>
             </div>
@@ -1161,7 +1168,7 @@ export default function Component() {
 
           {/* Question Cards */}
           {showQuickStart && (
-            <div className="ml-11 mr-11 grid gap-1 sm:gap-2 mb-4">
+            <div className="ml-8 sm:ml-11 mr-2 sm:mr-11 grid gap-1 sm:gap-2 mb-2 sm:mb-4">
               <h2 className="text-sm sm:text-xl font-semibold text-gray-800 dark:text-white mb-1">Quick Start</h2>
               <div className="grid md:grid-cols-2 gap-1 sm:gap-2">
                 {questionCards.map((question, index) => (
@@ -1182,7 +1189,7 @@ export default function Component() {
           )}
 
           {/* Show chat messages */}
-          <div className="flex-1 overflow-y-auto space-y-4 pb-24">
+          <div className="flex-1 overflow-y-auto space-y-2 sm:space-y-4 pb-20 sm:pb-24">
             {chatHistory.map((message, index) => {
               // Only show follow-up questions for the latest AI message
               const isLatestAiMessage = message.sender === 'ai' && 
@@ -1250,7 +1257,7 @@ export default function Component() {
 
 
         {/* Input Field - Fixed at bottom */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-2 sm:p-4">
+        <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-1.5 sm:p-4">
           {/* Upload Animation above chat bar */}
           {isImageUploading && (
             <div className="max-w-4xl mx-auto mb-2">
@@ -1261,7 +1268,7 @@ export default function Component() {
             </div>
           )}
           <div className="max-w-4xl mx-auto">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               <input
                 type="file"
                 accept="image/*"
@@ -1272,7 +1279,7 @@ export default function Component() {
               />
               <label
                 htmlFor="image-upload"
-                className={`w-11 h-11 flex items-center justify-center flex-shrink-0 rounded-full transition-colors ${
+                className={`w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center flex-shrink-0 rounded-full transition-colors ${
                   isChatLoading 
                     ? 'text-gray-300 cursor-not-allowed' 
                     : 'text-gray-500 hover:text-blue-600 hover:bg-blue-100 cursor-pointer'
@@ -1291,7 +1298,7 @@ export default function Component() {
                     }
                   }}
                   placeholder="Type your query here..."
-                  className="w-full px-4 py-3 text-xs sm:text-base bg-gray-200 border-gray-300 text-gray-800 placeholder-gray-500 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
+                  className="w-full px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-base bg-gray-200 border-gray-300 text-gray-800 placeholder-gray-500 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !isChatLoading && query.length <= 900) handleSend()
                   }}
@@ -1300,7 +1307,7 @@ export default function Component() {
               </div>
               <Button
                 size="icon"
-                className="w-11 h-11 rounded-full bg-gray-400 hover:bg-blue-500 text-white flex-shrink-0 transition-colors"
+                className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gray-400 hover:bg-blue-500 text-white flex-shrink-0 transition-colors"
                 onClick={() => handleSend()}
                 disabled={isChatLoading || !query.trim() || query.length > 900}
                 aria-label="Send message"
