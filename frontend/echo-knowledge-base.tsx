@@ -182,6 +182,9 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
                     .replace(/^\d+\. (.*$)/gm, '<li class="ml-3 sm:ml-4 list-decimal">$1</li>')
                     // Links
                     .replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" class="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">$1</a>')
+                    // Fix missing spaces between words/numbers and numbers/letters
+                    .replace(/([a-zA-Z])(\d)/g, '$1 $2')
+                    .replace(/(\d)([a-zA-Z])/g, '$1 $2')
                     // Line breaks
                     .replace(/\n/g, '<br>')
                 }} />
