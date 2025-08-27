@@ -8,6 +8,9 @@ import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as path from "path";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as s3 from "aws-cdk-lib/aws-s3";
+import * as s3n from "aws-cdk-lib/aws-s3-notifications";
 import { KubectlV32Layer } from "@aws-cdk/lambda-layer-kubectl-v32";
 import { KubernetesPatch } from "aws-cdk-lib/aws-eks"; // CHANGE: add patch construct
 
@@ -111,6 +114,58 @@ export class AgentEksFargateStack extends Stack {
 
     // KB id
     const knowledgeBaseId = this.node.tryGetContext("knowledgeBaseId") || "PLACEHOLDER";
+    
+    // Optional: Office-to-PDF processor
+    const documentsBucketName = this.node.tryGetContext("documentsBucketName");
+    if (documentsBucketName) {
+      const documentsBucket = s3.Bucket.fromBucketName(this, "DocumentsBucket", documentsBucketName);
+      
+      const officeToPdfLambda = new lambda.Function(this, "OfficeToPdfFunction", {
+        runtime: lambda.Runtime.NODEJS_18_X,
+        handler: "index.s3Handler",
+        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda/office-to-pdf")),
+        timeout: Duration.minutes(15),
+        memorySize: 1536,
+        layers: [
+          lambda.LayerVersion.fromLayerVersionArn(
+            this,
+            "LibreOfficeLayer",
+            `arn:aws:lambda:${this.region}:764866452798:layer:libreoffice-brotli:1`
+          )
+        ],
+        environment: {
+          BUCKET: documentsBucketName,
+          FONTCONFIG_PATH: "/var/task/fonts"
+        }
+      });
+      
+      documentsBucket.grantReadWrite(officeToPdfLambda);
+      documentsBucket.grantDelete(officeToPdfLambda);
+      
+      documentsBucket.addEventNotification(
+        s3.EventType.OBJECT_CREATED,
+        new s3n.LambdaDestination(officeToPdfLambda),
+        { prefix: "uploads/", suffix: ".pptx" }
+      );
+      
+      documentsBucket.addEventNotification(
+        s3.EventType.OBJECT_CREATED,
+        new s3n.LambdaDestination(officeToPdfLambda),
+        { prefix: "uploads/", suffix: ".docx" }
+      );
+      
+      documentsBucket.addEventNotification(
+        s3.EventType.OBJECT_CREATED,
+        new s3n.LambdaDestination(officeToPdfLambda),
+        { prefix: "uploads/", suffix: ".xlsx" }
+      );
+      
+      documentsBucket.addEventNotification(
+        s3.EventType.OBJECT_CREATED,
+        new s3n.LambdaDestination(officeToPdfLambda),
+        { prefix: "uploads/", suffix: ".pdf" }
+      );
+    }
 
     // App image
     const dockerAsset = new ecrAssets.DockerImageAsset(this, "AgentImage", {
