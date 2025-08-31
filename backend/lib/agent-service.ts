@@ -52,8 +52,7 @@ export class AgentService extends cdk8s.Chart {
           LOG_GROUP: kplus.EnvValue.fromValue(props.logGroupName)
         },
         resources: {
-          cpu: { request: kplus.Cpu.millis(500), limit: kplus.Cpu.millis(1000) },
-          memory: { request: kplus.Size.mebibytes(1024), limit: kplus.Size.mebibytes(2048) }
+          cpu: { request: kplus.Cpu.millis(500), limit: kplus.Cpu.millis(1000) }
         }
       }]
     });
