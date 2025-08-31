@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Prompt for action first
+if [ -z "${ACTION:-}" ]; then
+  read -rp "Deploy or destroy? [deploy/destroy]: " ACTION
+  ACTION=$(printf '%s' "$ACTION" | tr '[:upper:]' '[:lower:]')
+fi
+
 # Prompt for GitHub URL
 if [ -z "${GITHUB_URL:-}" ]; then
   read -rp "Enter GitHub repository URL (e.g. https://github.com/OWNER/REPO): " GITHUB_URL
@@ -45,21 +51,28 @@ if [ -z "${PROJECT_NAME:-}" ]; then
   read -rp "Enter CodeBuild project name: " PROJECT_NAME
 fi
 
-if [ -z "${KNOWLEDGE_BASE_ID:-}" ]; then
-  read -rp "Enter Bedrock Knowledge Base ID: " KNOWLEDGE_BASE_ID
-fi
+# Only prompt for deployment inputs if not destroying
+if [ "$ACTION" != "destroy" ]; then
+  if [ -z "${KNOWLEDGE_BASE_ID:-}" ]; then
+    read -rp "Enter Bedrock Knowledge Base ID: " KNOWLEDGE_BASE_ID
+  fi
 
-if [ -z "${DOCUMENTS_BUCKET:-}" ]; then
-  read -rp "Enter S3 documents bucket (optional): " DOCUMENTS_BUCKET
+  if [ -z "${DOCUMENTS_BUCKET:-}" ]; then
+    read -rp "Enter S3 documents bucket (optional): " DOCUMENTS_BUCKET
+  fi
 fi
 
 if [ -z "${GITHUB_TOKEN:-}" ]; then
   read -rp "Enter GitHub personal access token (repo permissions): " GITHUB_TOKEN
 fi
 
-if [ -z "${ACTION:-}" ]; then
-  read -rp "Deploy or destroy? [deploy/destroy]: " ACTION
-  ACTION=$(printf '%s' "$ACTION" | tr '[:upper:]' '[:lower:]')
+# Skip inputs for destroy
+if [ "$ACTION" = "destroy" ]; then
+  echo "Destroy mode - skipping deployment-specific inputs"
+  KNOWLEDGE_BASE_ID=""
+  DOCUMENTS_BUCKET=""
+  GITHUB_OWNER=""
+  GITHUB_REPO=""
 fi
 
 # Create IAM service role

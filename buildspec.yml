@@ -29,11 +29,9 @@ phases:
       - >-
         if [ "$ACTION" = "destroy" ]; then
           echo "Destroying CDK stack...";
-          cdk destroy --force \
-            -c knowledgeBaseId=$KNOWLEDGE_BASE_ID \
-            -c githubOwner=$GITHUB_OWNER \
-            -c githubRepo=$GITHUB_REPO \
-            -c documentsBucketName=$DOCUMENTS_BUCKET;
+          echo "Cleaning up security groups...";
+          aws ec2 describe-security-groups --filters "Name=group-name,Values=k8s-*" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null | xargs -r -n1 aws ec2 delete-security-group --group-id 2>/dev/null || true;
+          cdk destroy --force;
         else
           echo "Deploying CDK stack...";
           cdk deploy --require-approval never \
