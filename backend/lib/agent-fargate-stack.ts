@@ -519,7 +519,6 @@ frontend:
         - npm ci
     build:
       commands:
-        - 'echo "API URL: $NEXT_PUBLIC_API_URL"'
         - npm run build
   artifacts:
     baseDirectory: frontend/out
