@@ -7,22 +7,32 @@ phases:
     commands:
       - echo "Installing AWS CDK CLI..."
       - npm install -g aws-cdk
-      - echo "Changing into backend directory"
-      - cd backend
-      - echo "Installing npm dependencies"
-      - npm ci
+      - |
+        if [ "$ACTION" != "destroy" ]; then
+          echo "Changing into backend directory";
+          cd backend;
+          echo "Installing npm dependencies";
+          npm ci;
+        else
+          echo "Destroy mode - skipping npm install";
+        fi
 
   pre_build:
     commands:
-      - echo "Building TypeScript sources"
-      - npm run build
-      - echo "Bootstrapping CDK (no approval)..."
-      - >-
-        cdk bootstrap --require-approval never
-        -c knowledgeBaseId=$KNOWLEDGE_BASE_ID
-        -c githubOwner=$GITHUB_OWNER
-        -c githubRepo=$GITHUB_REPO
-        -c documentsBucketName=$DOCUMENTS_BUCKET || true
+      - |
+        if [ "$ACTION" != "destroy" ]; then
+          echo "Building TypeScript sources";
+          npm run build;
+          echo "Bootstrapping CDK (no approval)...";
+          cdk bootstrap --require-approval never \
+            -c knowledgeBaseId=$KNOWLEDGE_BASE_ID \
+            -c githubOwner=$GITHUB_OWNER \
+            -c githubRepo=$GITHUB_REPO \
+            -c documentsBucketName=$DOCUMENTS_BUCKET || true;
+        else
+          echo "Destroy mode - skipping build and bootstrap";
+          cd backend;
+        fi
 
   build:
     commands:
@@ -43,4 +53,18 @@ phases:
 
   post_build:
     commands:
+      - |
+        if [ "$ACTION" != "destroy" ]; then
+          echo "Triggering Amplify build...";
+          AMPLIFY_APP_ID=$(aws cloudformation describe-stacks \
+            --stack-name AgentEksFargateStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppId`].OutputValue' \
+            --output text);
+          if [ -n "$AMPLIFY_APP_ID" ]; then
+            aws amplify start-job \
+              --app-id $AMPLIFY_APP_ID \
+              --branch-name full-cdk \
+              --job-type RELEASE || echo "Amplify build trigger failed";
+          fi;
+        fi
       - 'echo "CDK $ACTION complete."'
