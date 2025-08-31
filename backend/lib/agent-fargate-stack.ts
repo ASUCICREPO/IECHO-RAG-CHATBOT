@@ -7,7 +7,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
-import * as amplify from "aws-cdk-lib/aws-amplify";
+
 import * as path from "path";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -504,31 +504,7 @@ export class AgentEksFargateStack extends Stack {
     
     api.node.addDependency(albDnsProvider);
 
-    // Amplify App for Frontend
-    const amplifyApp = new amplify.CfnApp(this, "iECHOFrontend", {
-      name: "iECHO-RAG-Chatbot",
-      description: "iECHO RAG Chatbot Frontend",
-      repository: `https://github.com/${this.node.tryGetContext("githubOwner") || "your-github-username"}/${this.node.tryGetContext("githubRepo") || "iECHO-RAG-CHATBOT"}`,
-      accessToken: SecretValue.secretsManager("github-access-token").unsafeUnwrap(),
-      environmentVariables: [
-        {
-          name: "NEXT_PUBLIC_API_URL",
-          value: api.url
-        },
-        {
-          name: "_LIVE_UPDATES",
-          value: "[{\"name\":\"Amplify CLI\",\"version\":\"latest\",\"pkg\":\"@aws-amplify/cli\"}\"]}"
-        }
-      ]
-    });
-
-    // Full-CDK branch
-    const fullCdkBranch = new amplify.CfnBranch(this, "FullCdkBranch", {
-      appId: amplifyApp.attrAppId,
-      branchName: "full-cdk",
-      enableAutoBuild: true,
-      stage: "PRODUCTION"
-    });
+    // Frontend deployment removed - deploy manually via Amplify console
 
     // Outputs
     this.exportValue(api.url, { name: "ApiGatewayUrl", description: "The API Gateway URL" });
@@ -536,8 +512,7 @@ export class AgentEksFargateStack extends Stack {
     this.exportValue(cluster.clusterEndpoint, { name: "AgentClusterEndpoint", description: "The endpoint of the EKS cluster" });
     this.exportValue(masterRole.roleArn, { name: "ClusterMasterRoleArn", description: "The master role ARN for kubectl access" });
     this.exportValue(albDnsProvider.value, { name: "AlbDnsName", description: "The ALB DNS name" });
-    this.exportValue(amplifyApp.attrDefaultDomain, { name: "AmplifyAppUrl", description: "The Amplify app URL" });
-    this.exportValue(amplifyApp.attrAppId, { name: "AmplifyAppId", description: "The Amplify app ID" });
+    // Amplify outputs removed
     
     // ALB hostname available via: kubectl get ingress agent-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
     
