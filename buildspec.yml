@@ -1,0 +1,48 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "Installing AWS CDK CLI..."
+      - npm install -g aws-cdk
+      - echo "Changing into backend directory"
+      - cd backend
+      - echo "Installing npm dependencies"
+      - npm ci
+
+  pre_build:
+    commands:
+      - echo "Building TypeScript sources"
+      - npm run build
+      - echo "Bootstrapping CDK (no approval)..."
+      - >-
+        cdk bootstrap --require-approval never
+        -c knowledgeBaseId=$KNOWLEDGE_BASE_ID
+        -c githubOwner=$GITHUB_OWNER
+        -c githubRepo=$GITHUB_REPO
+        -c documentsBucketName=$DOCUMENTS_BUCKET || true
+
+  build:
+    commands:
+      - >-
+        if [ "$ACTION" = "destroy" ]; then
+          echo "Destroying CDK stack...";
+          cdk destroy --force \
+            -c knowledgeBaseId=$KNOWLEDGE_BASE_ID \
+            -c githubOwner=$GITHUB_OWNER \
+            -c githubRepo=$GITHUB_REPO \
+            -c documentsBucketName=$DOCUMENTS_BUCKET;
+        else
+          echo "Deploying CDK stack...";
+          cdk deploy --require-approval never \
+            -c knowledgeBaseId=$KNOWLEDGE_BASE_ID \
+            -c githubOwner=$GITHUB_OWNER \
+            -c githubRepo=$GITHUB_REPO \
+            -c documentsBucketName=$DOCUMENTS_BUCKET;
+        fi
+
+  post_build:
+    commands:
+      - 'echo "CDK $ACTION complete."'

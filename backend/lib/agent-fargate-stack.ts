@@ -7,6 +7,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
+import * as amplify from "aws-cdk-lib/aws-amplify";
 
 import * as path from "path";
 import * as lambda from "aws-cdk-lib/aws-lambda";
@@ -504,7 +505,53 @@ export class AgentEksFargateStack extends Stack {
     
     api.node.addDependency(albDnsProvider);
 
-    // Frontend deployment removed - deploy manually via Amplify console
+    // Amplify App with GitHub App integration
+    const amplifyApp = new amplify.CfnApp(this, "iECHOAmplifyApp", {
+      name: "iECHO-RAG-Chatbot",
+      description: "iECHO RAG Chatbot Frontend",
+      repository: `https://github.com/${this.node.tryGetContext("githubOwner") || "ASUCICREPO"}/${this.node.tryGetContext("githubRepo") || "IECHO-RAG-CHATBOT"}`,
+      accessToken: SecretValue.secretsManager("github-access-token").unsafeUnwrap(),
+      platform: "WEB",
+      buildSpec: `version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - cd frontend
+        - npm ci
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    baseDirectory: frontend/out
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - frontend/node_modules/**/*
+      - frontend/.next/cache/**/*`,
+      environmentVariables: [
+        {
+          name: "NEXT_PUBLIC_API_URL",
+          value: api.url
+        }
+      ]
+    });
+
+    // Create branch for auto-build
+    const fullCdkBranch = new amplify.CfnBranch(this, "FullCdkBranch", {
+      appId: amplifyApp.attrAppId,
+      branchName: "full-cdk",
+      enableAutoBuild: true,
+      stage: "PRODUCTION"
+    });
+
+    // GitHub App setup:
+    // 1. Install GitHub App: https://github.com/apps/aws-amplify-us-west-2/installations/new
+    // 2. Create token with admin:repo_hook scope
+    // 3. Store: aws secretsmanager create-secret --name github-access-token --secret-string 'token'
+
+    // Note: Repository connection via GitHub App must be done manually in Amplify console
 
     // Outputs
     this.exportValue(api.url, { name: "ApiGatewayUrl", description: "The API Gateway URL" });
@@ -512,7 +559,8 @@ export class AgentEksFargateStack extends Stack {
     this.exportValue(cluster.clusterEndpoint, { name: "AgentClusterEndpoint", description: "The endpoint of the EKS cluster" });
     this.exportValue(masterRole.roleArn, { name: "ClusterMasterRoleArn", description: "The master role ARN for kubectl access" });
     this.exportValue(albDnsProvider.value, { name: "AlbDnsName", description: "The ALB DNS name" });
-    // Amplify outputs removed
+    this.exportValue(amplifyApp.attrDefaultDomain, { name: "AmplifyAppUrl", description: "The Amplify app URL" });
+    this.exportValue(amplifyApp.attrAppId, { name: "AmplifyAppId", description: "The Amplify app ID" });
     
     // ALB hostname available via: kubectl get ingress agent-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
     
