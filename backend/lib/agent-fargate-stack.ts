@@ -510,24 +510,6 @@ export class AgentEksFargateStack extends Stack {
       description: "iECHO RAG Chatbot Frontend",
       repository: `https://github.com/${this.node.tryGetContext("githubOwner") || "your-github-username"}/${this.node.tryGetContext("githubRepo") || "iECHO-RAG-CHATBOT"}`,
       accessToken: SecretValue.secretsManager("github-access-token").unsafeUnwrap(),
-      buildSpec: `version: 1
-frontend:
-  phases:
-    preBuild:
-      commands:
-        - cd frontend
-        - npm ci
-    build:
-      commands:
-        - npm run build
-  artifacts:
-    baseDirectory: frontend/out
-    files:
-      - '**/*'
-  cache:
-    paths:
-      - frontend/node_modules/**/*
-      - frontend/.next/cache/**/*`,
       environmentVariables: [
         {
           name: "NEXT_PUBLIC_API_URL",
