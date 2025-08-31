@@ -9,6 +9,7 @@ import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as amplify from "aws-cdk-lib/aws-amplify";
 
+
 import * as path from "path";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -545,11 +546,6 @@ frontend:
       enableAutoBuild: true,
       stage: "PRODUCTION"
     });
-
-    // GitHub App setup:
-    // 1. Install GitHub App: https://github.com/apps/aws-amplify-us-west-2/installations/new
-    // 2. Create token with admin:repo_hook scope
-    // 3. Store: aws secretsmanager create-secret --name github-access-token --secret-string 'token'
 
     // Note: Repository connection via GitHub App must be done manually in Amplify console
 

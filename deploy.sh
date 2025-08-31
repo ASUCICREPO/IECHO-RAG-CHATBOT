@@ -93,7 +93,17 @@ else
   sleep 10
 fi
 
-# Import GitHub OAuth credentials
+# Store GitHub token in Secrets Manager for CDK
+echo "Storing GitHub token in Secrets Manager..."
+aws secretsmanager create-secret \
+  --name github-access-token \
+  --secret-string "$GITHUB_TOKEN" \
+  --description "GitHub access token for Amplify" 2>/dev/null || \
+aws secretsmanager update-secret \
+  --secret-id github-access-token \
+  --secret-string "$GITHUB_TOKEN"
+
+# Import GitHub OAuth credentials for CodeBuild
 echo "Setting up GitHub OAuth credentials..."
 aws codebuild import-source-credentials \
   --server-type GITHUB \
