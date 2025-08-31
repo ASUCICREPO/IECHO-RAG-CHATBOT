@@ -145,6 +145,7 @@ aws codebuild create-project \
   --artifacts "$ARTIFACTS" \
   --environment "$ENVIRONMENT" \
   --service-role "$ROLE_ARN" \
+  --source-version "full-cdk" \
   --output json \
   --no-cli-pager
 
@@ -154,6 +155,7 @@ echo "✓ CodeBuild project created"
 echo "Starting build..."
 aws codebuild start-build \
   --project-name "$PROJECT_NAME" \
+  --source-version "full-cdk" \
   --no-cli-pager \
   --output json
 
