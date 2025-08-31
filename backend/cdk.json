@@ -83,6 +83,8 @@
     "@aws-cdk/aws-events:requireEventBusPolicySid": true,
     "@aws-cdk/core:aspectPrioritiesMutating": true,
     "@aws-cdk/aws-dynamodb:retainTableReplica": true,
-    "@aws-cdk/aws-stepfunctions:useDistributedMapResultWriterV2": true
+    "@aws-cdk/aws-stepfunctions:useDistributedMapResultWriterV2": true,
+    "githubOwner": "your-github-username",
+    "githubRepo": "iECHO-RAG-CHATBOT"
   }
 }
