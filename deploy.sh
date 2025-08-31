@@ -224,8 +224,4 @@ echo "==========================================="
 # Stream logs in real-time
 aws logs tail "/aws/codebuild/$PROJECT_NAME" \
   --follow \
-  --format short \
-  --filter-pattern "[$BUILD_ID]" || \
-aws logs tail "/aws/codebuild/$PROJECT_NAME" \
-  --follow \
   --format short
