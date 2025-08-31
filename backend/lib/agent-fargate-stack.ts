@@ -533,7 +533,7 @@ frontend:
       - frontend/.next/cache/**/*`,
       environmentVariables: [
         {
-          name: "NEXT_PUBLIC_API_URL",
+          name: "NEXT_PUBLIC_API_BASE_URL",
           value: api.url
         }
       ]
