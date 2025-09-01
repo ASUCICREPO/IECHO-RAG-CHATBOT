@@ -33,15 +33,21 @@ phases:
       - >-
         if [ "$ACTION" = "destroy" ]; then
           echo "Destroying CDK stack...";
-          echo "Cleaning up k8s security groups...";
           
-          # Delete k8s security groups by name pattern
-          aws ec2 describe-security-groups --filters "Name=group-name,Values=k8s-*" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null | xargs -r -n1 aws ec2 delete-security-group --group-id 2>/dev/null || true;
-          
-          # Wait for cleanup
-          sleep 10;
-          
-          cdk destroy --force;
+          # First attempt CDK destroy
+          cdk destroy --force || {
+            echo "CDK destroy failed, cleaning up k8s security groups...";
+            
+            # Delete k8s security groups
+            aws ec2 describe-security-groups --filters "Name=group-name,Values=k8s-*" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null | xargs -r -n1 aws ec2 delete-security-group --group-id 2>/dev/null || true;
+            
+            # Wait for cleanup
+            sleep 10;
+            
+            # Retry CDK destroy
+            echo "Retrying CDK destroy...";
+            cdk destroy --force;
+          };
         else
           echo "Deploying CDK stack...";
           cdk deploy --require-approval never \
