@@ -66,9 +66,8 @@ phases:
           
           # Try multiple times to get the App ID
           for i in {1..5}; do
-            AMPLIFY_APP_ID=$(aws cloudformation describe-stacks \
-              --stack-name AgentEksFargateStack \
-              --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppId`].OutputValue' \
+            AMPLIFY_APP_ID=$(aws cloudformation list-exports \
+              --query 'Exports[?Name==`ExportAmplifyAppId`].Value' \
               --output text 2>/dev/null);
             
             if [ -n "$AMPLIFY_APP_ID" ] && [ "$AMPLIFY_APP_ID" != "None" ]; then
@@ -96,8 +95,8 @@ phases:
           echo "Your iECHO RAG Chatbot is now live!";
           echo "";
           echo "📋 Deployment Summary:";
-          API_URL=$(aws cloudformation describe-stacks --stack-name AgentEksFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportApiGatewayUrl`].OutputValue' --output text 2>/dev/null || echo "Not found");
-          AMPLIFY_URL=$(aws cloudformation describe-stacks --stack-name AgentEksFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppUrl`].OutputValue' --output text 2>/dev/null || echo "Not found");
+          API_URL=$(aws cloudformation list-exports --query 'Exports[?Name==`ExportApiGatewayUrl`].Value' --output text 2>/dev/null || echo "Not found");
+          AMPLIFY_URL=$(aws cloudformation list-exports --query 'Exports[?Name==`ExportAmplifyAppUrl`].Value' --output text 2>/dev/null || echo "Not found");
           echo "   🌐 API Gateway: $API_URL";
           echo "   📱 Frontend: https://$AMPLIFY_URL";
           echo "";
