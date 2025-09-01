@@ -244,8 +244,7 @@ export class AgentEksFargateStack extends Stack {
         topicsConfig: [
           {
             name: "Irrelevant Content",
-            definition: "Content completely unrelated to tuberculosis, agriculture, farming, or health topics",
-            examples: ["Sports scores", "Programming and technical troubleshooting", "Homework help"],
+            definition: "Topics unrelated to tuberculosis, agriculture, or health including sports, programming, homework, and technical support",
             type: "DENY"
           }
         ]
