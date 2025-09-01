@@ -8,7 +8,7 @@ import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as amplify from "aws-cdk-lib/aws-amplify";
-import * as bedrock from "aws-cdk-lib/aws-bedrock";
+
 
 
 import * as path from "path";
@@ -30,7 +30,7 @@ interface AgentAppChartProps {
   accountId: string;
   logGroupName: string;
   feedbackTableName: string;
-  guardrailId?: string;
+
 }
 
 class AgentAppChart extends cdk8s.Chart {
@@ -76,8 +76,7 @@ class AgentAppChart extends cdk8s.Chart {
                 { name: "AWS_ACCOUNT_ID", value: props.accountId },
                 { name: "LOG_GROUP", value: props.logGroupName },
                 { name: "FEEDBACK_TABLE_NAME", value: props.feedbackTableName },
-                { name: "BEDROCK_GUARDRAIL_ID", value: props.guardrailId || "" },
-                { name: "BEDROCK_GUARDRAIL_VERSION", value: "DRAFT" }
+
               ],
               resources: {
                 requests: { memory: "512Mi", cpu: "500m" },
@@ -225,23 +224,7 @@ export class AgentEksFargateStack extends Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
     });
 
-    // Create Bedrock Guardrail
-    const guardrail = new bedrock.CfnGuardrail(this, "iECHOGuardrail", {
-      name: "iecho-content-filter",
-      description: "Content filtering for iECHO RAG chatbot",
-      blockedInputMessaging: "I can only provide information about TB and agriculture topics.",
-      blockedOutputsMessaging: "I cannot provide that type of information.",
-      contentPolicyConfig: {
-        filtersConfig: [
-          { type: "SEXUAL", inputStrength: "HIGH", outputStrength: "HIGH" },
-          { type: "VIOLENCE", inputStrength: "HIGH", outputStrength: "HIGH" },
-          { type: "HATE", inputStrength: "HIGH", outputStrength: "HIGH" },
-          { type: "INSULTS", inputStrength: "MEDIUM", outputStrength: "MEDIUM" },
-          { type: "MISCONDUCT", inputStrength: "HIGH", outputStrength: "HIGH" }
-        ]
-      },
 
-    });
 
     // IAM perms
     iamRoleForK8sSa.addToPrincipalPolicy(new iam.PolicyStatement({
@@ -251,7 +234,7 @@ export class AgentEksFargateStack extends Stack {
         "bedrock:RetrieveAndGenerate",
         "bedrock:Retrieve",
         "bedrock:GetInferenceProfile",
-        "bedrock:ApplyGuardrail",
+
         "bedrock-agent-runtime:Retrieve",
         "bedrock-agent-runtime:RetrieveAndGenerate",
       ],
@@ -473,7 +456,7 @@ export class AgentEksFargateStack extends Stack {
       accountId: this.account,
       logGroupName: logGroup.logGroupName,
       feedbackTableName: feedbackTable.tableName,
-      guardrailId: guardrail.attrGuardrailId,
+
 
     });
     

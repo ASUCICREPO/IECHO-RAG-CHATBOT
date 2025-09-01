@@ -34,7 +34,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 from strands import Agent, tool
-from strands.model_providers.amazon_bedrock import BedrockModelProvider
+
 try:
     from strands_tools import image_reader
 except ImportError:
@@ -110,8 +110,7 @@ s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 KNOWLEDGE_BASE_ID = os.environ.get('KNOWLEDGE_BASE_ID', '')
 FEEDBACK_TABLE_NAME = os.environ.get('FEEDBACK_TABLE_NAME', 'iecho-feedback-table')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
-GUARDRAIL_ID = os.environ.get('BEDROCK_GUARDRAIL_ID', '')
-GUARDRAIL_VERSION = os.environ.get('BEDROCK_GUARDRAIL_VERSION', 'DRAFT')
+
 
 # -----------------------------------------------------------------------------
 # In-memory session store (TTL managed)
@@ -162,14 +161,16 @@ Specialist tools (choose one for final response):
 - reject_handler: Politely declines unrelated queries
 
 CRITICAL RULES:
-- If query contains "Image path:", use image_reader FIRST, then route to appropriate specialist
+- If query contains "Image path:", use image_reader FIRST to analyze the image
+- After image analysis, evaluate BOTH the original text query AND image content together
+- If NEITHER the text query NOR the image content relates to TB, agriculture, or health topics, use reject_handler
+- Only route to specialists if the combined query (text + image analysis) is relevant to TB/agriculture
 - Always end with exactly one specialist tool call for the final response
 - NEVER show tool calls, reasoning, or internal processes to the user
 - Only return the clean, helpful response from the specialist
 - Route TB-related questions to tb_specialist
 - Route agriculture-related questions to agriculture_specialist
 - Route ambiguous questions that may connect to TB or agriculture contexts to general_specialist
-- Use reject_handler ONLY when the query has no meaningful connection to TB, agriculture, or related health/education contexts
 """
 
 TB_AGENT_PROMPT = """You are a TB specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
@@ -192,16 +193,6 @@ If image analysis results are provided in the query, use them as additional cont
 # -----------------------------------------------------------------------------
 # Utilities
 # -----------------------------------------------------------------------------
-def create_guardrail_config() -> Optional[Dict]:
-    """Create guardrail configuration for Bedrock models."""
-    if not GUARDRAIL_ID:
-        return None
-    return {
-        "guardrailIdentifier": GUARDRAIL_ID,
-        "guardrailVersion": GUARDRAIL_VERSION,
-        "trace": "enabled"
-    }
-
 def count_tokens(text: str) -> int:
     """Count tokens in text using AWS Nova approximation.
     
@@ -247,10 +238,7 @@ def query_knowledge_base(query: str, topic: str, conversation_history: List[str]
             }
         }
         
-        # Add guardrail if configured
-        guardrail_config = create_guardrail_config()
-        if guardrail_config:
-            request_config['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']['guardrailConfiguration'] = guardrail_config
+
         
         resp = bedrock_agent_runtime.retrieve_and_generate(**request_config)
         return resp
@@ -333,63 +321,26 @@ def build_specialists(conversation_history: List[str]):
     agri_tools = [make_kb_tool("agriculture", agri_citations, conversation_history)]
     gen_tools = [make_kb_tool("general", gen_citations, conversation_history)]
     
-    # Create agents with optional guardrails
-    guardrail_config = create_guardrail_config()
-    
-    if guardrail_config:
-        tb_model_provider = BedrockModelProvider(
-            model_id="us.amazon.nova-lite-v1:0",
-            region=os.environ.get('AWS_REGION', 'us-west-2'),
-            additional_model_request_fields={"guardrailConfig": guardrail_config}
-        )
-        agri_model_provider = BedrockModelProvider(
-            model_id="us.amazon.nova-lite-v1:0",
-            region=os.environ.get('AWS_REGION', 'us-west-2'),
-            additional_model_request_fields={"guardrailConfig": guardrail_config}
-        )
-        gen_model_provider = BedrockModelProvider(
-            model_id="us.amazon.nova-lite-v1:0",
-            region=os.environ.get('AWS_REGION', 'us-west-2'),
-            additional_model_request_fields={"guardrailConfig": guardrail_config}
-        )
-        
-        tb_agent = Agent(
-            system_prompt=TB_AGENT_PROMPT,
-            tools=tb_tools,
-            model_provider=tb_model_provider,
-            conversation_manager=conv_mgr,
-        )
-        agri_agent = Agent(
-            system_prompt=AGRICULTURE_AGENT_PROMPT,
-            tools=agri_tools,
-            model_provider=agri_model_provider,
-            conversation_manager=conv_mgr,
-        )
-        general_agent = Agent(
-            system_prompt="You are a generalist for health/education topics related to TB or agriculture. ALWAYS use the kb_search tool to find information, then provide brief, direct answers. Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.",
-            tools=gen_tools,
-            model_provider=gen_model_provider,
-            conversation_manager=conv_mgr,
-        )
-    else:
-        tb_agent = Agent(
-            system_prompt=TB_AGENT_PROMPT,
-            tools=tb_tools,
-            model="us.amazon.nova-lite-v1:0",
-            conversation_manager=conv_mgr,
-        )
-        agri_agent = Agent(
-            system_prompt=AGRICULTURE_AGENT_PROMPT,
-            tools=agri_tools,
-            model="us.amazon.nova-lite-v1:0",
-            conversation_manager=conv_mgr,
-        )
-        general_agent = Agent(
-            system_prompt="You are a generalist for health/education topics related to TB or agriculture. ALWAYS use the kb_search tool to find information, then provide brief, direct answers. Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.",
-            tools=gen_tools,
-            model="us.amazon.nova-lite-v1:0",
-            conversation_manager=conv_mgr,
-        )
+    tb_agent = Agent(
+        system_prompt=TB_AGENT_PROMPT,
+        tools=tb_tools,
+        model="us.amazon.nova-lite-v1:0",
+        conversation_manager=conv_mgr,
+    )
+
+    agri_agent = Agent(
+        system_prompt=AGRICULTURE_AGENT_PROMPT,
+        tools=agri_tools,
+        model="us.amazon.nova-lite-v1:0",
+        conversation_manager=conv_mgr,
+    )
+
+    general_agent = Agent(
+        system_prompt="You are a generalist for health/education topics related to TB or agriculture. ALWAYS use the kb_search tool to find information, then provide brief, direct answers. Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.",
+        tools=gen_tools,
+        model="us.amazon.nova-lite-v1:0",
+        conversation_manager=conv_mgr,
+    )
 
     return {
         "tb": (tb_agent, tb_citations),
@@ -440,10 +391,10 @@ def build_orchestrator_tools(conversation_history: List[str]):
         agent, _ = specialists["general"]
         return await _run_agent_and_capture(agent, user_query)
 
-    # @tool
-    # async def reject_handler(user_query: str) -> str:
-    #     """Politely decline queries unrelated to TB, agriculture, or health topics."""
-    #     return "I'm sorry, but I can only help with questions related to tuberculosis (TB), agriculture, and related health topics. If you have an image related to TB or agriculture, please describe what you'd like to know about it in your question."
+    @tool
+    async def reject_handler(user_query: str) -> str:
+        """Politely decline queries unrelated to TB, agriculture, or health topics."""
+        return "I'm sorry, but I can only help with questions related to tuberculosis (TB), agriculture, and related health topics. If you have an image related to TB or agriculture, please describe what you'd like to know about it in your question."
 
     def get_last_citations(tool_name: Optional[str]):
         mapping = {
@@ -460,8 +411,8 @@ def build_orchestrator_tools(conversation_history: List[str]):
     if image_reader:
         orchestrator_tools.append(image_reader)
     
-    # Add specialist tools  
-    orchestrator_tools.extend([tb_specialist, agriculture_specialist, general_specialist])  # reject_handler commented out
+    # Add specialist tools
+    orchestrator_tools.extend([tb_specialist, agriculture_specialist, general_specialist, reject_handler])
     
     return orchestrator_tools, get_last_citations, context
 
@@ -487,22 +438,10 @@ Generate questions that:
 
 Format: Return only the questions, one per line, without numbers or bullets."""
 
-        guardrail_config = create_guardrail_config()
-        if guardrail_config:
-            model_provider = BedrockModelProvider(
-                model_id="us.amazon.nova-lite-v1:0",
-                region=os.environ.get('AWS_REGION', 'us-west-2'),
-                additional_model_request_fields={"guardrailConfig": guardrail_config}
-            )
-            agent = Agent(
-                system_prompt="You are a helpful assistant that generates relevant follow-up questions. Be concise and practical.",
-                model_provider=model_provider
-            )
-        else:
-            agent = Agent(
-                system_prompt="You are a helpful assistant that generates relevant follow-up questions. Be concise and practical.",
-                model="us.amazon.nova-lite-v1:0"
-            )
+        agent = Agent(
+            system_prompt="You are a helpful assistant that generates relevant follow-up questions. Be concise and practical.",
+            model="us.amazon.nova-lite-v1:0"
+        )
 
         buf: List[str] = []
         async for ev in agent.stream_async(prompt):
@@ -605,29 +544,13 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     # Prepare input - images handled by image_reader tool
     input_content = query
     
-    # Create orchestrator with optional guardrails
-    guardrail_config = create_guardrail_config()
-    if guardrail_config:
-        orch_model_provider = BedrockModelProvider(
-            model_id="us.amazon.nova-lite-v1:0",
-            region=os.environ.get('AWS_REGION', 'us-west-2'),
-            additional_model_request_fields={"guardrailConfig": guardrail_config}
-        )
-        orchestrator = Agent(
-            system_prompt=context_prompt,
-            tools=tools,
-            model_provider=orch_model_provider,
-            conversation_manager=orch_mgr,
-            callback_handler=cb
-        )
-    else:
-        orchestrator = Agent(
-            system_prompt=context_prompt,
-            tools=tools,
-            model="us.amazon.nova-lite-v1:0",
-            conversation_manager=orch_mgr,
-            callback_handler=cb
-        )
+    orchestrator = Agent(
+        system_prompt=context_prompt,
+        tools=tools,
+        model="us.amazon.nova-lite-v1:0",
+        conversation_manager=orch_mgr,
+        callback_handler=cb
+    )
 
     full_text = ""
     in_thinking = False
@@ -762,29 +685,13 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
     tracker = ToolChoiceTracker()
     cb = make_streaming_callback(on_tool_start=tracker.set)
 
-    # Create orchestrator with optional guardrails
-    guardrail_config = create_guardrail_config()
-    if guardrail_config:
-        orch_model_provider = BedrockModelProvider(
-            model_id="us.amazon.nova-lite-v1:0",
-            region=os.environ.get('AWS_REGION', 'us-west-2'),
-            additional_model_request_fields={"guardrailConfig": guardrail_config}
-        )
-        orchestrator = Agent(
-            system_prompt=ORCHESTRATOR_PROMPT,
-            tools=tools,
-            model_provider=orch_model_provider,
-            conversation_manager=orch_mgr,
-            callback_handler=cb
-        )
-    else:
-        orchestrator = Agent(
-            system_prompt=ORCHESTRATOR_PROMPT,
-            tools=tools,
-            model="us.amazon.nova-lite-v1:0",
-            conversation_manager=orch_mgr,
-            callback_handler=cb
-        )
+    orchestrator = Agent(
+        system_prompt=ORCHESTRATOR_PROMPT,
+        tools=tools,
+        model="us.amazon.nova-lite-v1:0",
+        conversation_manager=orch_mgr,
+        callback_handler=cb
+    )
 
     # Prepare input - images handled by image_reader tool
     input_content = query
@@ -821,7 +728,6 @@ def health_check():
     return {
         "status": "healthy",
         "service": "iECHO RAG Chatbot API",
-        "guardrailsEnabled": bool(GUARDRAIL_ID),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -988,8 +894,7 @@ async def get_status():
         "knowledgeBaseConfigured": bool(KNOWLEDGE_BASE_ID),
         "documentsConfigured": bool(KNOWLEDGE_BASE_ID),
         "feedbackConfigured": bool(FEEDBACK_TABLE_NAME),
-        "guardrailsEnabled": bool(GUARDRAIL_ID),
-        "guardrailId": GUARDRAIL_ID if GUARDRAIL_ID else None,
+
         "region": os.environ.get('AWS_REGION', 'us-west-2'),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
