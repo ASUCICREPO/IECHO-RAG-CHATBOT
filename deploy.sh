@@ -202,15 +202,11 @@ ENVIRONMENT='{
 ARTIFACTS='{"type":"NO_ARTIFACTS"}'
 SOURCE='{"type":"GITHUB","location":"'"$GITHUB_URL"'"}'
 
-# Read buildspec content for inline use
-BUILDSPEC_CONTENT=$(cat buildspec.yml | sed 's/"/\\"/g' | tr '\n' ' ')
-INLINE_BUILDSPEC='{"type":"GITHUB","location":"'"$GITHUB_URL"'","buildspec":"'"$BUILDSPEC_CONTENT"'"}'
-
 if aws codebuild batch-get-projects --names "$PROJECT_NAME" --query 'projects[0].name' --output text 2>/dev/null | grep -q "$PROJECT_NAME"; then
   echo "Updating existing project..."
   aws codebuild update-project \
     --name "$PROJECT_NAME" \
-    --source "$INLINE_BUILDSPEC" \
+    --source "$SOURCE" \
     --artifacts "$ARTIFACTS" \
     --environment "$ENVIRONMENT" \
     --service-role "$ROLE_ARN" \
@@ -220,7 +216,7 @@ else
   echo "Creating new project..."
   aws codebuild create-project \
     --name "$PROJECT_NAME" \
-    --source "$INLINE_BUILDSPEC" \
+    --source "$SOURCE" \
     --artifacts "$ARTIFACTS" \
     --environment "$ENVIRONMENT" \
     --service-role "$ROLE_ARN" \
