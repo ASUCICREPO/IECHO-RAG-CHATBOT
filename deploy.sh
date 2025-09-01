@@ -221,7 +221,24 @@ echo "✓ Build started: $BUILD_ID"
 echo "Streaming logs..."
 echo "==========================================="
 
-# Stream logs in real-time
-aws logs tail "/aws/codebuild/$PROJECT_NAME" \
-  --follow \
-  --format short
+# Stream logs and monitor build status
+{
+  aws logs tail "/aws/codebuild/$PROJECT_NAME" \
+    --follow \
+    --format short &
+  LOG_PID=$!
+  
+  # Monitor build status
+  while true; do
+    STATUS=$(aws codebuild batch-get-builds --ids "$BUILD_ID" --query 'builds[0].buildStatus' --output text 2>/dev/null)
+    if [ "$STATUS" = "SUCCEEDED" ] || [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "STOPPED" ]; then
+      sleep 5  # Allow final logs to stream
+      kill $LOG_PID 2>/dev/null
+      echo ""
+      echo "==========================================="
+      echo "✓ Build completed with status: $STATUS"
+      break
+    fi
+    sleep 10
+  done
+}

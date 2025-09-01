@@ -84,4 +84,22 @@ phases:
             fi;
           done;
         fi
-      - 'echo "CDK $ACTION complete."'
+      - |
+        if [ "$ACTION" = "destroy" ]; then
+          echo "";
+          echo "🗑️  DESTROY COMPLETE! 🗑️";
+          echo "All resources have been successfully destroyed.";
+          echo "";
+        else
+          echo "";
+          echo "🚀 DEPLOYMENT COMPLETE! 🚀";
+          echo "Your iECHO RAG Chatbot is now live!";
+          echo "";
+          echo "📋 Deployment Summary:";
+          API_URL=$(aws cloudformation describe-stacks --stack-name AgentEksFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportApiGatewayUrl`].OutputValue' --output text 2>/dev/null || echo "Not found");
+          AMPLIFY_URL=$(aws cloudformation describe-stacks --stack-name AgentEksFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppUrl`].OutputValue' --output text 2>/dev/null || echo "Not found");
+          echo "   🌐 API Gateway: $API_URL";
+          echo "   📱 Frontend: https://$AMPLIFY_URL";
+          echo "";
+          echo "✅ Ready to use!";
+        fi
