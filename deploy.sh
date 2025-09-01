@@ -236,7 +236,11 @@ echo "==========================================="
       kill $LOG_PID 2>/dev/null
       echo ""
       echo "==========================================="
-      echo "✓ Build completed with status: $STATUS"
+      if [ "$ACTION" = "destroy" ]; then
+        echo "✓ Infrastructure destroyed with status: $STATUS"
+      else
+        echo "✓ Build completed with status: $STATUS"
+      fi
       break
     fi
     sleep 10
