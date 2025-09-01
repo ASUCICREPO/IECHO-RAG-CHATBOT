@@ -60,30 +60,6 @@ phases:
   post_build:
     commands:
       - |
-        if [ "$ACTION" != "destroy" ]; then
-          echo "Triggering Amplify build...";
-          sleep 30;
-          
-          # Try multiple times to get the App ID
-          for i in {1..5}; do
-            AMPLIFY_APP_ID=$(aws cloudformation list-exports \
-              --query 'Exports[?Name==`ExportAmplifyAppId`].Value' \
-              --output text 2>/dev/null);
-            
-            if [ -n "$AMPLIFY_APP_ID" ] && [ "$AMPLIFY_APP_ID" != "None" ]; then
-              echo "Found Amplify App ID: $AMPLIFY_APP_ID";
-              aws amplify start-job \
-                --app-id $AMPLIFY_APP_ID \
-                --branch-name full-cdk \
-                --job-type RELEASE && echo "Amplify build started successfully" || echo "Amplify build trigger failed";
-              break;
-            else
-              echo "Attempt $i: App ID not found, waiting...";
-              sleep 10;
-            fi;
-          done;
-        fi
-      - |
         if [ "$ACTION" = "destroy" ]; then
           echo "";
           echo "🗑️  DESTROY COMPLETE! 🗑️";
@@ -96,23 +72,19 @@ phases:
           echo "";
           echo "📋 Deployment Summary:";
           
-          # Wait for CloudFormation exports to be available
-          echo "Waiting for CloudFormation exports...";
-          sleep 15;
+          # Get URLs from CDK stack outputs
+          API_URL=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportApiGatewayUrl`].OutputValue' --output text 2>/dev/null);
+          AMPLIFY_URL=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppUrl`].OutputValue' --output text 2>/dev/null);
+          AMPLIFY_APP_ID=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppId`].OutputValue' --output text 2>/dev/null);
           
-          API_URL=$(aws cloudformation list-exports --query 'Exports[?Name==`ExportApiGatewayUrl`].Value' --output text 2>/dev/null);
-          AMPLIFY_URL=$(aws cloudformation list-exports --query 'Exports[?Name==`ExportAmplifyAppUrl`].Value' --output text 2>/dev/null);
+          echo "   🌐 API Gateway: $API_URL";
+          echo "   📱 Frontend: https://$AMPLIFY_URL";
           
-          if [ -n "$API_URL" ] && [ "$API_URL" != "None" ]; then
-            echo "   🌐 API Gateway: $API_URL";
-          else
-            echo "   🌐 API Gateway: Check CloudFormation exports for ExportApiGatewayUrl";
-          fi;
-          
-          if [ -n "$AMPLIFY_URL" ] && [ "$AMPLIFY_URL" != "None" ]; then
-            echo "   📱 Frontend: https://$AMPLIFY_URL";
-          else
-            echo "   📱 Frontend: Check CloudFormation exports for ExportAmplifyAppUrl";
+          # Trigger Amplify build
+          if [ -n "$AMPLIFY_APP_ID" ] && [ "$AMPLIFY_APP_ID" != "None" ]; then
+            echo "";
+            echo "Triggering Amplify build...";
+            aws amplify start-job --app-id $AMPLIFY_APP_ID --branch-name full-cdk --job-type RELEASE && echo "✅ Amplify build started" || echo "⚠️ Amplify build failed";
           fi;
           
           echo "";
