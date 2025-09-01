@@ -3,8 +3,14 @@ set -euo pipefail
 
 # Prompt for action first
 if [ -z "${ACTION:-}" ]; then
-  read -rp "Deploy or destroy? [deploy/destroy]: " ACTION
-  ACTION=$(printf '%s' "$ACTION" | tr '[:upper:]' '[:lower:]')
+  while true; do
+    read -rp "Deploy or destroy? [deploy/destroy]: " ACTION
+    ACTION=$(printf '%s' "$ACTION" | tr '[:upper:]' '[:lower:]')
+    if [ "$ACTION" = "deploy" ] || [ "$ACTION" = "destroy" ]; then
+      break
+    fi
+    echo "Error: Please enter 'deploy' or 'destroy'"
+  done
 fi
 
 # Skip GitHub setup for destroy
@@ -52,13 +58,25 @@ if [ "$ACTION" != "destroy" ]; then
 fi
 
 if [ -z "${PROJECT_NAME:-}" ]; then
-  read -rp "Enter CodeBuild project name: " PROJECT_NAME
+  while true; do
+    read -rp "Enter CodeBuild project name: " PROJECT_NAME
+    if [[ "$PROJECT_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{1,254}$ ]]; then
+      break
+    fi
+    echo "Error: Project name must be 2-255 chars, start with alphanumeric, contain only letters, numbers, hyphens, underscores"
+  done
 fi
 
 # Only prompt for deployment inputs if not destroying
 if [ "$ACTION" != "destroy" ]; then
   if [ -z "${KNOWLEDGE_BASE_ID:-}" ]; then
-    read -rp "Enter Bedrock Knowledge Base ID: " KNOWLEDGE_BASE_ID
+    while true; do
+      read -rp "Enter Bedrock Knowledge Base ID: " KNOWLEDGE_BASE_ID
+      if [[ "$KNOWLEDGE_BASE_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+        break
+      fi
+      echo "Error: Knowledge Base ID should be 10 uppercase alphanumeric characters (e.g., ABC123DEF4)"
+    done
   fi
 
   if [ -z "${DOCUMENTS_BUCKET:-}" ]; then
