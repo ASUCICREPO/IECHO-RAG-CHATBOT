@@ -95,10 +95,26 @@ phases:
           echo "Your iECHO RAG Chatbot is now live!";
           echo "";
           echo "📋 Deployment Summary:";
-          API_URL=$(aws cloudformation list-exports --query 'Exports[?Name==`ExportApiGatewayUrl`].Value' --output text 2>/dev/null || echo "Not found");
-          AMPLIFY_URL=$(aws cloudformation list-exports --query 'Exports[?Name==`ExportAmplifyAppUrl`].Value' --output text 2>/dev/null || echo "Not found");
-          echo "   🌐 API Gateway: $API_URL";
-          echo "   📱 Frontend: https://$AMPLIFY_URL";
+          
+          # Wait for CloudFormation exports to be available
+          echo "Waiting for CloudFormation exports...";
+          sleep 15;
+          
+          API_URL=$(aws cloudformation list-exports --query 'Exports[?Name==`ExportApiGatewayUrl`].Value' --output text 2>/dev/null);
+          AMPLIFY_URL=$(aws cloudformation list-exports --query 'Exports[?Name==`ExportAmplifyAppUrl`].Value' --output text 2>/dev/null);
+          
+          if [ -n "$API_URL" ] && [ "$API_URL" != "None" ]; then
+            echo "   🌐 API Gateway: $API_URL";
+          else
+            echo "   🌐 API Gateway: Check CloudFormation exports for ExportApiGatewayUrl";
+          fi;
+          
+          if [ -n "$AMPLIFY_URL" ] && [ "$AMPLIFY_URL" != "None" ]; then
+            echo "   📱 Frontend: https://$AMPLIFY_URL";
+          else
+            echo "   📱 Frontend: Check CloudFormation exports for ExportAmplifyAppUrl";
+          fi;
+          
           echo "";
           echo "✅ Ready to use!";
         fi
