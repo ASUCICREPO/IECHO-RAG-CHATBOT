@@ -80,11 +80,11 @@ phases:
           echo "   🌐 API Gateway: $API_URL";
           echo "   📱 Frontend: https://$AMPLIFY_URL";
           
-          # Trigger Amplify build
+          # Trigger Amplify build (optional)
           if [ -n "$AMPLIFY_APP_ID" ] && [ "$AMPLIFY_APP_ID" != "None" ]; then
             echo "";
             echo "Triggering Amplify build...";
-            aws amplify start-job --app-id $AMPLIFY_APP_ID --branch-name full-cdk --job-type RELEASE && echo "✅ Amplify build started" || echo "⚠️ Amplify build failed";
+            aws amplify start-job --app-id $AMPLIFY_APP_ID --branch-name full-cdk --job-type RELEASE >/dev/null 2>&1 && echo "✅ Amplify build started" || echo "🔄 Amplify build already running or failed";
           fi;
           
           echo "";
