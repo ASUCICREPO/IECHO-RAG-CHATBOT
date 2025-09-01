@@ -240,15 +240,7 @@ export class AgentEksFargateStack extends Stack {
           { type: "MISCONDUCT", inputStrength: "HIGH", outputStrength: "HIGH" }
         ]
       },
-      topicPolicyConfig: {
-        topicsConfig: [
-          {
-            name: "Irrelevant Content",
-            definition: "Topics unrelated to tuberculosis, agriculture, or health including sports, programming, homework, and technical support",
-            type: "DENY"
-          }
-        ]
-      }
+
     });
 
     // IAM perms
