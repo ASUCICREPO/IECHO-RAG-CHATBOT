@@ -74,8 +74,9 @@ logging.basicConfig(level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def log_to_cloudwatch(message: str, level: str = "INFO"):
+def log_to_cloudwatch(message: str, level: str = "INFO", error_details: Optional[Dict] = None):
     if not os.environ.get('LOG_GROUP'):
+        print(f"[{level}] {message}")
         return
     try:
         cloudwatch_logs = boto3.client('logs', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
@@ -87,18 +88,21 @@ def log_to_cloudwatch(message: str, level: str = "INFO"):
             )
         except cloudwatch_logs.exceptions.ResourceAlreadyExistsException:
             pass
+        
+        log_message = f"[{level}] {message}"
+        if error_details:
+            log_message += f" | Error Details: {json.dumps(error_details)}"
+            
         cloudwatch_logs.put_log_events(
             logGroupName=os.environ.get('LOG_GROUP'),
             logStreamName=stream_name,
             logEvents=[{
                 'timestamp': int(datetime.now(timezone.utc).timestamp() * 1000),
-                'message': f"[{level}] {message}"
+                'message': log_message
             }]
         )
     except Exception as e:
-        print(f"CloudWatch logging failed: {e}")
-
-print(f"Application starting with LOG_GROUP: {os.environ.get('LOG_GROUP')}")
+        print(f"CloudWatch logging failed: {e} | Original message: [{level}] {message}")
 
 # -----------------------------------------------------------------------------
 # AWS clients & env
@@ -110,6 +114,9 @@ s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 KNOWLEDGE_BASE_ID = os.environ.get('KNOWLEDGE_BASE_ID', '')
 FEEDBACK_TABLE_NAME = os.environ.get('FEEDBACK_TABLE_NAME', 'iecho-feedback-table')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
+
+print(f"Application starting with LOG_GROUP: {os.environ.get('LOG_GROUP')}")
+log_to_cloudwatch(f"Application started - LOG_GROUP: {os.environ.get('LOG_GROUP')}, KB_ID: {KNOWLEDGE_BASE_ID}, Region: {os.environ.get('AWS_REGION', 'us-west-2')}")
 
 
 # -----------------------------------------------------------------------------
@@ -782,6 +789,16 @@ async def chat(request: ChatRequest):
         }
 
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/chat',
+            'user_id': request.userId,
+            'session_id': request.sessionId,
+            'query_length': len(request.query) if request.query else 0,
+            'has_image': bool(request.image)
+        }
+        log_to_cloudwatch("Chat endpoint error", "ERROR", error_details)
         logger.error(f"Error in chat endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -805,6 +822,16 @@ async def chat_stream(request: ChatRequest):
         )
 
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/chat-stream',
+            'user_id': request.userId,
+            'session_id': request.sessionId,
+            'query_length': len(request.query) if request.query else 0,
+            'has_image': bool(request.image)
+        }
+        log_to_cloudwatch("Chat-stream endpoint error", "ERROR", error_details)
         logger.error(f"Error in chat-stream endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -834,6 +861,15 @@ async def submit_feedback(request: FeedbackRequest):
         return {"message": "Feedback submitted successfully", "feedbackId": item['feedbackId']}
 
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/feedback',
+            'user_id': request.userId,
+            'response_id': request.responseId,
+            'rating': request.rating
+        }
+        log_to_cloudwatch("Feedback endpoint error", "ERROR", error_details)
         logger.error(f"Error in feedback endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -869,6 +905,13 @@ async def list_documents():
         return {"documents": docs, "count": len(docs)}
 
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/documents',
+            'kb_id': KNOWLEDGE_BASE_ID
+        }
+        log_to_cloudwatch("Documents endpoint error", "ERROR", error_details)
         logger.error(f"Error in documents endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -883,6 +926,13 @@ async def get_document_url(path: str):
         url = s3.generate_presigned_url('get_object', Params={'Bucket': bucket, 'Key': key}, ExpiresIn=3600)
         return {"url": url}
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/document-url',
+            'path': path
+        }
+        log_to_cloudwatch("Document URL generation error", "ERROR", error_details)
         logger.error(f"Error generating presigned URL: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate document URL: {str(e)}")
 
