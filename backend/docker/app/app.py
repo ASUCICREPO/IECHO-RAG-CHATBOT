@@ -440,10 +440,10 @@ def build_orchestrator_tools(conversation_history: List[str]):
         agent, _ = specialists["general"]
         return await _run_agent_and_capture(agent, user_query)
 
-    @tool
-    async def reject_handler(user_query: str) -> str:
-        """Politely decline queries unrelated to TB, agriculture, or health topics."""
-        return "I'm sorry, but I can only help with questions related to tuberculosis (TB), agriculture, and related health topics. If you have an image related to TB or agriculture, please describe what you'd like to know about it in your question."
+    # @tool
+    # async def reject_handler(user_query: str) -> str:
+    #     """Politely decline queries unrelated to TB, agriculture, or health topics."""
+    #     return "I'm sorry, but I can only help with questions related to tuberculosis (TB), agriculture, and related health topics. If you have an image related to TB or agriculture, please describe what you'd like to know about it in your question."
 
     def get_last_citations(tool_name: Optional[str]):
         mapping = {
@@ -460,8 +460,8 @@ def build_orchestrator_tools(conversation_history: List[str]):
     if image_reader:
         orchestrator_tools.append(image_reader)
     
-    # Add specialist tools
-    orchestrator_tools.extend([tb_specialist, agriculture_specialist, general_specialist, reject_handler])
+    # Add specialist tools  
+    orchestrator_tools.extend([tb_specialist, agriculture_specialist, general_specialist])  # reject_handler commented out
     
     return orchestrator_tools, get_last_citations, context
 
