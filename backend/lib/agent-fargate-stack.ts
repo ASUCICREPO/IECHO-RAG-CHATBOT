@@ -342,7 +342,15 @@ export class AgentEksFargateStack extends Stack {
       const officeToPdfLambda = new lambda.Function(this, "OfficeToPdfFunction", {
         runtime: lambda.Runtime.NODEJS_18_X,
         handler: "index.s3Handler",
-        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda/office-to-pdf")),
+        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda/office-to-pdf"), {
+          bundling: {
+            image: lambda.Runtime.NODEJS_18_X.bundlingImage,
+            command: [
+              'bash', '-c',
+              'npm ci && cp -r . /asset-output'
+            ],
+          },
+        }),
         timeout: Duration.minutes(15),
         memorySize: 1536,
         logGroup: lambdaLogGroup,
