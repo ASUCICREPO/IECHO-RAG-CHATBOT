@@ -87,7 +87,7 @@ pnpm-lock.yaml
 yarn.lock
 package-lock.json
 # But keep Lambda package-lock files
-!lambda/**/package-lock.json
+!backend/lambda/**/package-lock.json
 
 # CDK Assets
 cdk.context.json
