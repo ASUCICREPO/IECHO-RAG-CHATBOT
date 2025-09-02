@@ -3,8 +3,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const aws = require('aws-sdk');
-const s3 = new aws.S3();
+const { S3Client, GetObjectCommand, CopyObjectCommand, DeleteObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const s3Client = new S3Client({});
 
 const { convertTo } = require('@shelf/aws-lambda-libreoffice');
 
@@ -32,26 +32,23 @@ exports.s3Handler = async (event) => {
         try {
             // 1. Download file from S3
             console.log('Downloading file...');
-            const fileStream = fs.createWriteStream(inputFile);
-            const s3Stream = s3.getObject({ Bucket: bucket, Key: key }).createReadStream();
-            
-            await new Promise((resolve, reject) => {
-                s3Stream.pipe(fileStream);
-                fileStream.on('finish', resolve);
-                fileStream.on('error', reject);
-                s3Stream.on('error', reject);
-            });
+            const getObjectResponse = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+            const chunks = [];
+            for await (const chunk of getObjectResponse.Body) {
+                chunks.push(chunk);
+            }
+            fs.writeFileSync(inputFile, Buffer.concat(chunks));
             
             if (fileExt === '.pdf') {
                 // 2. For PDF files, copy directly to processed folder
                 console.log('Copying PDF directly to processed folder...');
                 const processedKey = key.replace('uploads/', 'processed/');
-                await s3.copyObject({
+                await s3Client.send(new CopyObjectCommand({
                     CopySource: `${bucket}/${key}`,
                     Bucket: bucket,
                     Key: processedKey,
                     ContentType: 'application/pdf'
-                }).promise();
+                }));
                 console.log(`Successfully copied PDF: ${key} -> ${processedKey}`);
             } else {
                 // 2. Convert office files to PDF
@@ -60,18 +57,18 @@ exports.s3Handler = async (event) => {
                 
                 // 3. Upload converted file to processed/ folder
                 console.log('Uploading converted file...');
-                await s3.upload({
+                await s3Client.send(new PutObjectCommand({
                     Bucket: bucket,
                     Key: outputKey,
-                    Body: fs.createReadStream(outputFile),
+                    Body: fs.readFileSync(outputFile),
                     ContentType: 'application/pdf'
-                }).promise();
+                }));
                 console.log(`Successfully processed: ${key} -> ${outputKey}`);
             }
             
             // 4. Delete original file from uploads/ folder
             console.log('Deleting original file...');
-            await s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+            await s3Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 
             
         } catch (error) {
