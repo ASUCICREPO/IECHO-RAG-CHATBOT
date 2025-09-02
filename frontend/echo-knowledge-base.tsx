@@ -72,6 +72,8 @@ interface ChatMessage {
   error?: boolean;
   followUpQuestions?: string[];
   image?: string; // Base64 image data
+  thinking?: string; // Thinking process content
+  isThinking?: boolean; // Currently thinking
 }
 
 function CitationList({ citations }: { citations: Citation[] }) {
@@ -135,6 +137,8 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
   onRate: () => void,
   onFollowUpClick?: (question: string) => void 
 }) {
+  const [showThinking, setShowThinking] = useState(false);
+  
   return (
     <>
       <div className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-4 items-start gap-3`}>
@@ -154,6 +158,33 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
                 alt="Uploaded image" 
                 className="w-full h-full object-cover rounded-lg" 
               />
+            </div>
+          )}
+          
+          {/* Thinking Section */}
+          {message.sender === 'ai' && (message.thinking || message.isThinking) && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+              <button 
+                onClick={() => setShowThinking(!showThinking)}
+                className="w-full px-3 py-2 bg-gray-100 hover:bg-gray-200 flex items-center gap-2 text-sm text-gray-600 transition-colors"
+              >
+                {message.isThinking ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span>Thinking...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>💭 Reasoning complete</span>
+                  </>
+                )}
+                <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${showThinking ? 'rotate-180' : ''}`} />
+              </button>
+              {showThinking && message.thinking && (
+                <div className="px-3 py-2 text-sm text-gray-600 italic border-t border-gray-200">
+                  {message.thinking}
+                </div>
+              )}
             </div>
           )}
           
@@ -555,15 +586,18 @@ export default function Component() {
       const decoder = new TextDecoder();
       let buffer = '';
       let streamedText = '';
+      let thinkingText = '';
       let finalData: ChatResponse | null = null;
       const aiMessageId = `ai-${Date.now()}`;
       
-      // Add placeholder AI message - this will hide the thinking animation
+      // Add placeholder AI message
       setChatHistory(prev => [...prev, { 
         id: aiMessageId,
         sender: 'ai', 
         text: '',
-        citations: []
+        citations: [],
+        thinking: '',
+        isThinking: false
       }]);
 
       try {
@@ -580,7 +614,26 @@ export default function Component() {
               try {
                 const data = JSON.parse(line);
                 
-                if (data.type === 'content' && data.data) {
+                if (data.type === 'thinking_start') {
+                  setChatHistory(prev => prev.map(msg => 
+                    msg.id === aiMessageId 
+                      ? { ...msg, isThinking: true }
+                      : msg
+                  ));
+                } else if (data.type === 'thinking' && data.data) {
+                  thinkingText += data.data;
+                  setChatHistory(prev => prev.map(msg => 
+                    msg.id === aiMessageId 
+                      ? { ...msg, thinking: thinkingText }
+                      : msg
+                  ));
+                } else if (data.type === 'thinking_end') {
+                  setChatHistory(prev => prev.map(msg => 
+                    msg.id === aiMessageId 
+                      ? { ...msg, isThinking: false }
+                      : msg
+                  ));
+                } else if (data.type === 'content' && data.data) {
                   streamedText += data.data;
                   setChatHistory(prev => prev.map(msg => 
                     msg.id === aiMessageId 
@@ -617,7 +670,8 @@ export default function Component() {
                 text: finalData.response,
                 responseId: finalData.responseId,
                 citations: finalData.citations || [],
-                followUpQuestions: finalData.followUpQuestions || []
+                followUpQuestions: finalData.followUpQuestions || [],
+                isThinking: false
               }
             : msg
         ));

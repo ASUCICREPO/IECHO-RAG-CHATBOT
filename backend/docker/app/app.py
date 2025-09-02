@@ -571,28 +571,37 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
         # Track tool usage
         if 'tool' in ev and ev.get('phase') in ('start', 'call', 'begin'):
             tracker.set(ev.get('tool'))
-        # Forward only visible data
+        # Forward data with proper typing for thinking vs content
         if "data" in ev:
             chunk = ev["data"]
             
             # Check for thinking tag start/end
             if '<thinking>' in chunk:
                 in_thinking = True
+                yield json.dumps({"type": "thinking_start"}) + "\n"
+                # Send the thinking content without the tag
+                thinking_content = chunk.replace('<thinking>', '').strip()
+                if thinking_content:
+                    yield json.dumps({"type": "thinking", "data": thinking_content}) + "\n"
                 continue
             if '</thinking>' in chunk:
                 in_thinking = False
+                # Send any remaining thinking content before the tag
+                thinking_content = chunk.replace('</thinking>', '').strip()
+                if thinking_content:
+                    yield json.dumps({"type": "thinking", "data": thinking_content}) + "\n"
+                yield json.dumps({"type": "thinking_end"}) + "\n"
                 continue
                 
-            # Skip streaming if in thinking tags
-            if in_thinking:
-                continue
-            
-            # Skip empty chunks or chunks with only whitespace/newlines
+            # Skip empty chunks
             if not chunk.strip():
                 continue
                 
-            full_text += chunk
-            yield json.dumps({"type": "content", "data": chunk}) + "\n"
+            if in_thinking:
+                yield json.dumps({"type": "thinking", "data": chunk}) + "\n"
+            else:
+                full_text += chunk
+                yield json.dumps({"type": "content", "data": chunk}) + "\n"
 
     full_text = filter_thinking_tags(full_text)
 
