@@ -591,7 +591,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
             elif chunk == '>' and in_thinking and not full_text:
                 # This is likely the closing > of <thinking>
                 continue
-            elif chunk == '</thinking' or chunk.startswith('</thinking'):
+            elif chunk.endswith('</thinking') or chunk == '</thinking':
                 # Send any content before the closing tag
                 thinking_content = chunk.replace('</thinking>', '').replace('</thinking', '').strip()
                 if thinking_content:
@@ -599,8 +599,10 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
                 in_thinking = False
                 yield json.dumps({"type": "thinking_end"}) + "\n"
                 continue
-            elif chunk == '>' and not in_thinking:
-                # This might be the closing > of </thinking>
+            elif chunk == '>' and in_thinking:
+                # This is the closing > of </thinking>
+                in_thinking = False
+                yield json.dumps({"type": "thinking_end"}) + "\n"
                 continue
                 
             if in_thinking:
