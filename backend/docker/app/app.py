@@ -578,12 +578,13 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
             # Check for thinking tag start/end
             if '<thinking>' in chunk:
                 in_thinking = True
+                continue
             if '</thinking>' in chunk:
                 in_thinking = False
                 continue
                 
             # Skip streaming if in thinking tags
-            if in_thinking or '<thinking>' in chunk or '</thinking>' in chunk:
+            if in_thinking:
                 continue
             
             # Skip empty chunks or chunks with only whitespace/newlines
