@@ -228,7 +228,7 @@ def filter_thinking_tags(text: str) -> str:
     text = re.sub(r'</?thinking[^>]*>', '', text)
     text = re.sub(r'Action: [^\n]*\n?', '', text)
     # Remove decision tokens and any following newlines
-    text = re.sub(r'^\s*<(TB|AG|GN|REJECT)>\s*\n*', '', text)
+    text = re.sub(r'^\s*<(TB|AG|REJECT)>\s*\n*', '', text)
     return text.strip()
 
 
@@ -319,10 +319,9 @@ def make_kb_tool(topic: str, citations_sink: list, conversation_history: List[st
     return kb_search
 
 def build_specialists(conversation_history: List[str]):
-    """Create 3 specialist Agents, each with its own KB tool & citations sink."""
+    """Create 2 specialist Agents, each with its own KB tool & citations sink."""
     tb_citations: List[Dict] = []
     agri_citations: List[Dict] = []
-    gen_citations: List[Dict] = []
 
     # In-memory conversation manager - prioritize SlidingWindow for medical/agricultural precision
     if SlidingWindowConversationManager is not None:
@@ -335,7 +334,6 @@ def build_specialists(conversation_history: List[str]):
     # Build tools list (no image_reader at specialist level)
     tb_tools = [make_kb_tool("tuberculosis", tb_citations, conversation_history)]
     agri_tools = [make_kb_tool("agriculture", agri_citations, conversation_history)]
-    gen_tools = [make_kb_tool("general", gen_citations, conversation_history)]
     
     tb_agent = Agent(
         system_prompt=TB_AGENT_PROMPT,
@@ -351,17 +349,9 @@ def build_specialists(conversation_history: List[str]):
         conversation_manager=conv_mgr,
     )
 
-    general_agent = Agent(
-        system_prompt="You are a generalist for health/education topics related to TB or agriculture. ALWAYS use the kb_search tool to find information, then provide brief, direct answers. Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.",
-        tools=gen_tools,
-        model="us.amazon.nova-lite-v1:0",
-        conversation_manager=conv_mgr,
-    )
-
     return {
         "tb": (tb_agent, tb_citations),
         "agri": (agri_agent, agri_citations),
-        "general": (general_agent, gen_citations),
     }
 
 def build_orchestrator_tools(conversation_history: List[str]):
@@ -401,11 +391,7 @@ def build_orchestrator_tools(conversation_history: List[str]):
         agent, _ = specialists["agri"]
         return await _run_agent_and_capture(agent, user_query)
 
-    @tool
-    async def general_specialist(user_query: str) -> str:
-        """Generalist agent for topics not covered by TB or Agriculture; concise, practical answers."""
-        agent, _ = specialists["general"]
-        return await _run_agent_and_capture(agent, user_query)
+
 
     @tool
     async def reject_handler(user_query: str) -> str:
@@ -416,7 +402,6 @@ def build_orchestrator_tools(conversation_history: List[str]):
         mapping = {
             "tb_specialist": specialists["tb"][1],
             "agriculture_specialist": specialists["agri"][1],
-            "general_specialist": specialists["general"][1],
         }
         return mapping.get(tool_name, [])
 
@@ -428,7 +413,7 @@ def build_orchestrator_tools(conversation_history: List[str]):
         orchestrator_tools.append(image_reader)
     
     # Add specialist tools
-    orchestrator_tools.extend([tb_specialist, agriculture_specialist, general_specialist, reject_handler])
+    orchestrator_tools.extend([tb_specialist, agriculture_specialist, reject_handler])
     
     return orchestrator_tools, get_last_citations, context
 
