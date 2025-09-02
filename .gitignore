@@ -9,6 +9,7 @@ cdk.out/
 *.js
 *.d.ts
 !jest.config.js
+!lambda/**/*.js
 
 # Lambda Layers (built during deployment)
 lambda-layers/*/python/
