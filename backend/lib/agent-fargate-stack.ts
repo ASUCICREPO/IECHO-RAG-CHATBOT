@@ -347,7 +347,7 @@ export class AgentEksFargateStack extends Stack {
             image: lambda.Runtime.NODEJS_18_X.bundlingImage,
             command: [
               'bash', '-c',
-              'npm ci && cp -r . /asset-output'
+              'npm install && cp -r . /asset-output'
             ],
           },
         }),

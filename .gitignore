@@ -86,8 +86,6 @@ next-env.d.ts
 pnpm-lock.yaml
 yarn.lock
 package-lock.json
-# But keep Lambda package-lock files
-!backend/lambda/**/package-lock.json
 
 # CDK Assets
 cdk.context.json
