@@ -162,9 +162,8 @@ Analysis tools (use first if needed):
 - image_reader: Analyze images to understand visual content
 
 Specialist tools (choose one for final response):
-- tb_specialist: Handles tuberculosis-related questions
-- agriculture_specialist: Handles agriculture/farming topics  
-- general_specialist: Handles health/education topics that relate to TB or agriculture
+- tb_specialist: Handles ALL tuberculosis and health-related questions
+- agriculture_specialist: Handles ALL agriculture and farming topics
 - reject_handler: Politely declines unrelated queries
 
 CRITICAL GUARDRAILS:
@@ -180,9 +179,8 @@ CRITICAL GUARDRAILS:
    - Reject inappropriate content: offensive language, harmful instructions, illegal activities
 
 3. ROUTING LOGIC:
-   - TB-related: symptoms, diagnosis, treatment, prevention, patient care → tb_specialist
-   - Agriculture-related: crops, farming, irrigation, soil, food safety → agriculture_specialist
-   - Health/education connecting to TB/agriculture → general_specialist
+   - TB/Health-related: symptoms, diagnosis, treatment, prevention, patient care, nutrition, public health → tb_specialist
+   - Agriculture-related: crops, farming, irrigation, soil, food safety, livestock → agriculture_specialist
    - Everything else → reject_handler
 
 4. OUTPUT RULES:
@@ -191,7 +189,7 @@ CRITICAL GUARDRAILS:
    - Only return the clean, helpful response from the specialist
 """
 
-TB_AGENT_PROMPT = """You are a TB specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
+TB_AGENT_PROMPT = """You are a TB and Health specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
 - TB diagnosis & symptoms; lab tests (smear, GeneXpert), imaging
 - Treatment protocols & medications (e.g., HRZE, MDR/XDR management)
 - Infection control & prevention strategies
@@ -270,7 +268,7 @@ class ToolChoiceTracker:
         self.name: Optional[str] = None
     def set(self, name: Optional[str]):
         # Only track specialist tools, not analysis tools
-        if name and name in ['tb_specialist', 'agriculture_specialist', 'general_specialist', 'reject_handler']:
+        if name and name in ['tb_specialist', 'agriculture_specialist', 'reject_handler']:
             self.name = name
 
 def make_streaming_callback(on_tool_start: Optional[Callable[[str], None]] = None):
