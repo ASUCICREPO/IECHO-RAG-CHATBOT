@@ -575,26 +575,32 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
         if "data" in ev:
             chunk = ev["data"]
             
-            # Check for thinking tag start/end
-            if '<thinking>' in chunk:
-                in_thinking = True
-                yield json.dumps({"type": "thinking_start"}) + "\n"
-                # Send the thinking content without the tag
-                thinking_content = chunk.replace('<thinking>', '').strip()
-                if thinking_content:
-                    yield json.dumps({"type": "thinking", "data": thinking_content}) + "\n"
-                continue
-            if '</thinking>' in chunk:
-                in_thinking = False
-                # Send any remaining thinking content before the tag
-                thinking_content = chunk.replace('</thinking>', '').strip()
-                if thinking_content:
-                    yield json.dumps({"type": "thinking", "data": thinking_content}) + "\n"
-                yield json.dumps({"type": "thinking_end"}) + "\n"
-                continue
-                
             # Skip empty chunks
             if not chunk.strip():
+                continue
+            
+            # Handle thinking tags that might be split across chunks
+            if chunk == '<thinking' or chunk.startswith('<thinking'):
+                in_thinking = True
+                yield json.dumps({"type": "thinking_start"}) + "\n"
+                # Send any content after the tag
+                thinking_content = chunk.replace('<thinking>', '').replace('<thinking', '').strip()
+                if thinking_content:
+                    yield json.dumps({"type": "thinking", "data": thinking_content}) + "\n"
+                continue
+            elif chunk == '>' and in_thinking and not full_text:
+                # This is likely the closing > of <thinking>
+                continue
+            elif chunk == '</thinking' or chunk.startswith('</thinking'):
+                # Send any content before the closing tag
+                thinking_content = chunk.replace('</thinking>', '').replace('</thinking', '').strip()
+                if thinking_content:
+                    yield json.dumps({"type": "thinking", "data": thinking_content}) + "\n"
+                in_thinking = False
+                yield json.dumps({"type": "thinking_end"}) + "\n"
+                continue
+            elif chunk == '>' and not in_thinking:
+                # This might be the closing > of </thinking>
                 continue
                 
             if in_thinking:
