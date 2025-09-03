@@ -184,9 +184,9 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
                     <span>💭 View reasoning</span>
                   </>
                 )}
-                <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${(showThinking || message.isThinking) ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${message.thinking ? 'rotate-180' : ''}`} />
               </button>
-              {(showThinking || message.isThinking) && message.thinking && (
+              {message.thinking && (
                 <div className="px-3 py-2 text-sm text-gray-600 italic border-t border-gray-200">
                   {message.thinking}
                 </div>
