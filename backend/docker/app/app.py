@@ -587,13 +587,16 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
             elif chunk == '>' and in_thinking and not full_text:
                 # This is likely the closing > of <thinking>
                 continue
-            elif chunk == '</' and in_thinking:
-                # Start of closing tag - end thinking mode
+            elif '</' in chunk and in_thinking:
+                # Handle closing tag - extract content before </
+                before_tag = chunk.split('</')[0]
+                if before_tag:
+                    yield json.dumps({"type": "thinking", "data": before_tag}) + "\n"
                 in_thinking = False
                 yield json.dumps({"type": "thinking_end"}) + "\n"
                 continue
-            elif chunk == '</thinking' or chunk == 'thinking' or (chunk == '>\n' and not in_thinking):
-                # Parts of closing tag after thinking ended - skip
+            elif chunk in ['</thinking', 'thinking', '>', '>\n'] and not in_thinking:
+                # Skip remaining parts of closing tag
                 continue
                 
             if in_thinking:

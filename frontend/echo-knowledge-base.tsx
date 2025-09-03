@@ -678,7 +678,7 @@ export default function Component() {
           msg.id === aiMessageId 
             ? { 
                 ...msg, 
-                text: finalData.response,
+                text: finalData.response, // Use clean final response, not streamed text
                 responseId: finalData.responseId,
                 citations: finalData.citations || [],
                 followUpQuestions: finalData.followUpQuestions || [],
