@@ -112,7 +112,10 @@ function CitationList({ citations }: { citations: Citation[] }) {
                       }
                     } catch (error) {
                       console.error('Failed to get document URL:', error);
-                      alert('Failed to open document');
+                      const errorMsg = error instanceof Error && error.message.includes('Failed to fetch') 
+                        ? 'Network connection failed. Please check your internet and try again.'
+                        : 'Failed to open document. Please try again later.';
+                      alert(errorMsg);
                     }
                   }}
                   className="text-left text-blue-700 hover:text-blue-900 hover:bg-blue-100 px-1 py-0.5 rounded transition-colors text-xs font-medium break-words"
@@ -132,10 +135,11 @@ function CitationList({ citations }: { citations: Citation[] }) {
   );
 }
 
-function ChatMessage({ message, onRate, onFollowUpClick }: { 
+function ChatMessage({ message, onRate, onFollowUpClick, onRetry }: { 
   message: ChatMessage, 
   onRate: () => void,
-  onFollowUpClick?: (question: string) => void 
+  onFollowUpClick?: (question: string) => void,
+  onRetry?: (messageId: string) => void
 }) {
   const [showThinking, setShowThinking] = useState(false);
   
@@ -194,7 +198,9 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
           <div className={`p-2 sm:p-3 rounded-lg ${
             message.sender === 'user' 
               ? 'bg-blue-600 text-white' 
-              : 'bg-white text-gray-800 border border-gray-200'
+              : message.error
+                ? 'bg-red-50 text-red-800 border border-red-200'
+                : 'bg-white text-gray-800 border border-gray-200'
           }`}>
             <div className="whitespace-pre-wrap text-xs sm:text-base">
               {message.sender === 'ai' ? (
@@ -234,7 +240,7 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
             )}
             
             {/* Disclaimer for AI messages */}
-            {message.sender === 'ai' && (
+            {message.sender === 'ai' && !message.error && (
               <div className="flex justify-end mt-1">
                 <span className="text-[10px] text-gray-400">Chatbot can make mistakes. Please double-check responses.</span>
               </div>
@@ -272,20 +278,35 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
         </div>
       )}
       
-      {/* Feedback Button - Below the message box */}
-      {message.sender === 'ai' && message.responseId && (
-        <div className="flex justify-start ml-11 -mt-2">
-          <button 
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onRate();
-            }}
-            className="text-xs text-yellow-400 hover:text-yellow-500 flex items-center gap-1 font-medium"
-          >
-            <Star className="w-3 h-3" strokeWidth={2.5} />
-            Rate this response
-          </button>
+      {/* Action Buttons - Below the message box */}
+      {message.sender === 'ai' && (
+        <div className="flex justify-start ml-11 -mt-2 gap-3">
+          {message.error && onRetry && (
+            <button 
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onRetry(message.id);
+              }}
+              className="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1 font-medium"
+            >
+              <RefreshCw className="w-3 h-3" strokeWidth={2.5} />
+              Try again
+            </button>
+          )}
+          {message.responseId && (
+            <button 
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onRate();
+              }}
+              className="text-xs text-yellow-400 hover:text-yellow-500 flex items-center gap-1 font-medium"
+            >
+              <Star className="w-3 h-3" strokeWidth={2.5} />
+              Rate this response
+            </button>
+          )}
         </div>
       )}
     </>
@@ -399,7 +420,6 @@ export default function Component() {
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
     if (!apiBaseUrl) {
       setApiStatus('error');
-      setChatError('API base URL is not configured');
       return;
     }
 
@@ -506,6 +526,8 @@ export default function Component() {
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
           errorMessage = 'Request timed out. Please check your connection and try again.';
+        } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          errorMessage = 'Network connection failed. Please check your internet connection and try again.';
         } else {
           errorMessage = error.message || errorMessage;
         }
@@ -520,8 +542,6 @@ export default function Component() {
   const handleSend = async (messageText?: string) => {
     const textToSend = messageText || query.trim();
     if (!textToSend || isChatLoading) return;
-    
-
     
     setIsChatLoading(true);
     setChatError(null);
@@ -684,16 +704,38 @@ export default function Component() {
     } catch (error) {
       console.error('Chat error:', error);
       
-      let errorMessage = 'Failed to get response from the chatbot. Please try again.';
+      let errorMessage = 'Connection failed. Please check your internet and try again.';
+      let isRetryable = true;
       
       if (error instanceof Error) {
-        // Clean up error message - remove technical prefixes
-        errorMessage = error.message
-          .replace(/^Internal server error: \d+: /, '')
-          .replace(/^HTTP error! status: \d+/, 'Connection error');
+        if (error.name === 'AbortError') {
+          errorMessage = 'Request timed out. The server may be busy, please try again.';
+        } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          errorMessage = 'Network connection failed. Please check your internet connection and try again.';
+          setApiStatus('offline');
+        } else if (error.message.includes('HTTP error! status: 5')) {
+          errorMessage = 'Server error. Our team has been notified. Please try again in a few minutes.';
+        } else if (error.message.includes('HTTP error! status: 4')) {
+          errorMessage = 'Request error. Please check your input and try again.';
+          isRetryable = false;
+        } else {
+          // Clean up error message - remove technical prefixes
+          errorMessage = error.message
+            .replace(/^Internal server error: \d+: /, '')
+            .replace(/^HTTP error! status: \d+/, 'Connection error');
+        }
       }
       
-      setChatError(errorMessage);
+      // Add error message to chat history instead of just setting error state
+      const errorMessageId = `error-${Date.now()}`;
+      setChatHistory(prev => [...prev, {
+        id: errorMessageId,
+        sender: 'ai',
+        text: `❌ ${errorMessage}${isRetryable ? '\n\n🔄 Click "Try again" below to retry your message.' : ''}`,
+        error: true
+      }]);
+      
+      setChatError(null); // Clear the error state since we're showing it in chat
     } finally {
       setIsChatLoading(false);
     }
@@ -747,7 +789,15 @@ export default function Component() {
   // Health check function 
   const fetchHealth = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/health`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/health`, {
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
       if (res.ok) {
         const data = await res.json();
         setApiStatus(data.status === 'healthy' ? 'online' : 'offline');
@@ -756,7 +806,11 @@ export default function Component() {
       }
     } catch (error) {
       console.error('Health check failed:', error);
-      setApiStatus('error');
+      if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('Failed to fetch'))) {
+        setApiStatus('offline');
+      } else {
+        setApiStatus('error');
+      }
     }
   };
 
@@ -1269,6 +1323,18 @@ export default function Component() {
                       setShowRatingDialog(true);
                     }}
                     onFollowUpClick={isLatestAiMessage ? handleFollowUpClick : undefined}
+                    onRetry={(messageId) => {
+                      // Find the user message that preceded this error
+                      const errorIndex = chatHistory.findIndex(m => m.id === messageId);
+                      if (errorIndex > 0) {
+                        const userMessage = chatHistory[errorIndex - 1];
+                        if (userMessage.sender === 'user') {
+                          // Remove the error message and retry
+                          setChatHistory(prev => prev.filter(m => m.id !== messageId));
+                          handleSend(userMessage.text);
+                        }
+                      }
+                    }}
                   />
                 </div>
               );
@@ -1287,11 +1353,7 @@ export default function Component() {
               </div>
             )}
 
-            {chatError && (
-              <div className="text-red-600 text-sm p-2 rounded bg-red-50">
-                {chatError}
-              </div>
-            )}
+
             <div ref={messagesEndRef} />
           </div>
         </div>
