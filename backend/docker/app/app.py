@@ -566,6 +566,9 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
                 os.unlink(temp_path)
             raise e
     
+    # Add current query to history before orchestrator runs so it has full context
+    history.append(f"User: {query}")
+    
     tools, get_last_citations, image_context = build_orchestrator_tools(history)
 
     # Orchestrator conversation manager - prioritize SlidingWindow for medical/agricultural precision
@@ -650,8 +653,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
 
     full_text = filter_thinking_tags(full_text)
 
-    # Update session history
-    history.append(f"User: {query}")
+    # Update session history with response (query already added above)
     history.append(f"Assistant: {full_text}")
 
     # Citations from the specialist that actually ran (or None)
@@ -809,11 +811,13 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
         sess = conversation_sessions[session_id]
         sess['last_access'] = time()
         history = sess['history']
+        
+        # Add current query to history before orchestrator runs
+        history.append(f"User: {request.query}")
 
         response_text, citations, chosen_tool = await run_orchestrator_once(request.query, history, request.image)
 
-        # Update history
-        history.append(f"User: {request.query}")
+        # Update history with response
         history.append(f"Assistant: {response_text}")
 
         followups = await generate_follow_up_questions(response_text, request.query, history)
