@@ -139,6 +139,17 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
 }) {
   const [showThinking, setShowThinking] = useState(false);
   
+  // Auto-expand thinking when streaming, auto-collapse when complete
+  useEffect(() => {
+    if (message.isThinking) {
+      setShowThinking(true);
+    } else if (message.thinking && !message.isThinking) {
+      // Delay collapse to let user see completion
+      const timer = setTimeout(() => setShowThinking(false), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [message.isThinking, message.thinking]);
+  
   return (
     <>
       <div className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-4 items-start gap-3`}>
@@ -175,7 +186,7 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
                   </>
                 ) : (
                   <>
-                    <span>💭 Reasoning complete</span>
+                    <span>💭 View reasoning</span>
                   </>
                 )}
                 <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${showThinking ? 'rotate-180' : ''}`} />
