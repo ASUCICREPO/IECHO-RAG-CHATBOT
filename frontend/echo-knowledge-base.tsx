@@ -139,18 +139,6 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
 }) {
   const [showThinking, setShowThinking] = useState(false);
   
-  // Force expand when thinking starts or has content
-  useEffect(() => {
-    if (message.isThinking || message.thinking) {
-      setShowThinking(true);
-    }
-    if (!message.isThinking && message.thinking) {
-      // Auto-collapse after thinking completes
-      const timer = setTimeout(() => setShowThinking(false), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [message.isThinking, message.thinking]);
-  
   return (
     <>
       <div className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-4 items-start gap-3`}>
@@ -189,9 +177,9 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
                     <span>💭 View reasoning</span>
                   </>
                 )}
-                <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${(showThinking || message.isThinking) ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${message.thinking ? 'rotate-180' : ''}`} />
               </button>
-              {(showThinking || message.isThinking) && message.thinking && (
+              {message.thinking && (
                 <div className="px-3 py-2 text-sm text-gray-600 italic border-t border-gray-200">
                   {message.thinking}
                 </div>
@@ -1280,19 +1268,7 @@ export default function Component() {
                 </div>
               );
             })}
-            {isChatLoading && chatHistory.length > 0 && chatHistory[chatHistory.length - 1]?.sender === 'user' && (
-              <div className="flex justify-start items-start gap-3 mb-4">
-                <Avatar className="w-8 h-8 bg-[#fb2c36] text-white flex-shrink-0">
-                  <AvatarFallback className="bg-[#fb2c36] text-white font-bold">E</AvatarFallback>
-                </Avatar>
-                <div className="bg-gray-100 p-3 rounded-lg max-w-[80%]">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-bounce"></div>
-                    <span className="text-sm text-gray-600">Thinking...</span>
-                  </div>
-                </div>
-              </div>
-            )}
+
 
             {chatError && (
               <div className="text-red-600 text-sm p-2 rounded bg-red-50">
