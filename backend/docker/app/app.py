@@ -2,7 +2,7 @@
 # 
 # ARCHITECTURE OVERVIEW:
 # - Orchestrator Agent: Routes queries to specialized domain agents using natural language
-# - Specialist Agents: TB, Agriculture, and General health/education experts
+# - Specialist Agents: TB, Agriculture
 # - Knowledge Base Integration: AWS Bedrock Knowledge Base with vector search
 # - Streaming Support: Real-time response streaming with reasoning suppression
 # - Session Management: In-memory conversation history with TTL cleanup
