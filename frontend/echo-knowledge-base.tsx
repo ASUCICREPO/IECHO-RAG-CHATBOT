@@ -171,21 +171,17 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
           {/* Thinking Section */}
           {message.sender === 'ai' && (message.thinking || message.isThinking) && (
             <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
-              <button 
-                onClick={() => setShowThinking(!showThinking)}
-                className="w-full px-3 py-2 bg-gray-100 hover:bg-gray-200 flex items-center gap-2 text-sm text-gray-600 transition-colors"
-              >
+              <div className="w-full px-3 py-2 bg-gray-100 flex items-center gap-2 text-sm text-gray-600">
                 {message.isThinking ? (
                   <>
-                    <span>💭 Thinking...</span>
+                    <span>Thinking...</span>
                   </>
                 ) : (
                   <>
-                    <span>💭 View reasoning</span>
+                    <span>Reasoning</span>
                   </>
                 )}
-                <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${message.thinking ? 'rotate-180' : ''}`} />
-              </button>
+              </div>
               {message.thinking && (
                 <div className="px-3 py-2 text-sm text-gray-600 italic border-t border-gray-200">
                   {message.thinking}
