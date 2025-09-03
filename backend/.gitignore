@@ -39,3 +39,7 @@ var/
 .vscode/
 *.swp
 *.swo
+
+# Test files
+test_performance.py
+memory_test.py
