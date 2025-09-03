@@ -440,24 +440,9 @@ def build_orchestrator_tools(conversation_history: List[str]):
     # Build orchestrator tools list
     orchestrator_tools = []
     
-    # Add image_reader if available with context capture
+    # Add image_reader if available
     if image_reader:
-        # Wrap image_reader to capture results
-        original_image_reader = image_reader
-        
-        @tool
-        async def enhanced_image_reader(image_path: str) -> str:
-            """Analyze images to understand visual content and store results for specialists."""
-            try:
-                result = await original_image_reader(image_path)
-                context['image_analysis'] = result  # Store for specialists
-                return result
-            except Exception as e:
-                logger.error(f"Image analysis failed: {e}")
-                context['image_analysis'] = None
-                return f"Image analysis unavailable. Please describe the image content in your question for better assistance."
-        
-        orchestrator_tools.append(enhanced_image_reader)
+        orchestrator_tools.append(image_reader)
     
     # Add specialist tools
     orchestrator_tools.extend([tb_specialist, agriculture_specialist, reject_handler])
