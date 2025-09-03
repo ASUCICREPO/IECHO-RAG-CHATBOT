@@ -199,11 +199,12 @@ CRITICAL GUARDRAILS:
    - If ANY context (image/text/history) mentions TB/health topics → tb_specialist
    - If ANY context (image/text/history) mentions agriculture topics → agriculture_specialist
    - If ALL context is unrelated → reject_handler
-   - Follow-up questions should use same specialist as previous related questions
+   - CRITICAL: For vague follow-up questions with pronouns ("explain them", "tell me more", "can you elaborate"), USE CONVERSATION HISTORY to determine which specialist handled the previous question and route to the SAME specialist
 
 4. OUTPUT RULES:
    - Always end with exactly one specialist tool call for the final response
    - Only return the clean, helpful response from the specialist
+   - NEVER route vague follow-up questions to reject_handler if conversation history shows previous TB/agriculture context
 """
 
 TB_AGENT_PROMPT = """You are a TB and Health specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
