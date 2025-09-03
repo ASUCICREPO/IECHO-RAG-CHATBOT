@@ -199,7 +199,6 @@ CRITICAL GUARDRAILS:
 
 4. OUTPUT RULES:
    - Always end with exactly one specialist tool call for the final response
-   - NEVER show tool calls, reasoning, or internal processes to the user
    - Only return the clean, helpful response from the specialist
 """
 
@@ -385,7 +384,7 @@ def build_orchestrator_tools(conversation_history: List[str]):
     specialists = build_specialists(conversation_history)
 
     # Store image analysis result to pass to specialists and logs
-    context = {'image_analysis': None}
+    context = {'image_analysis': None, 'original_query': None}
     
     async def _run_agent_and_capture(agent: Agent, query: str) -> str:
         """Run a specialist agent once and capture visible text only (reasoning suppressed)."""
@@ -406,13 +405,21 @@ def build_orchestrator_tools(conversation_history: List[str]):
     async def tb_specialist(user_query: str) -> str:
         """TB specialist agent: diagnosis, tests, protocols, MDR/XDR, prevention, patient counseling."""
         agent, _ = specialists["tb"]
-        return await _run_agent_and_capture(agent, user_query)
+        # Include image analysis if available
+        enhanced_query = user_query
+        if context['image_analysis']:
+            enhanced_query = f"Image analysis: {context['image_analysis']}\n\nUser query: {user_query}"
+        return await _run_agent_and_capture(agent, enhanced_query)
 
     @tool
     async def agriculture_specialist(user_query: str) -> str:
         """Agriculture specialist agent: crop/soil mgmt, irrigation, IPM, yield, food safety & nutrition, infrastructure."""
         agent, _ = specialists["agri"]
-        return await _run_agent_and_capture(agent, user_query)
+        # Include image analysis if available
+        enhanced_query = user_query
+        if context['image_analysis']:
+            enhanced_query = f"Image analysis: {context['image_analysis']}\n\nUser query: {user_query}"
+        return await _run_agent_and_capture(agent, enhanced_query)
 
 
 
@@ -431,9 +438,19 @@ def build_orchestrator_tools(conversation_history: List[str]):
     # Build orchestrator tools list
     orchestrator_tools = []
     
-    # Add image_reader if available
+    # Add image_reader if available with context capture
     if image_reader:
-        orchestrator_tools.append(image_reader)
+        # Wrap image_reader to capture results
+        original_image_reader = image_reader
+        
+        @tool
+        async def enhanced_image_reader(image_path: str) -> str:
+            """Analyze images to understand visual content and store results for specialists."""
+            result = await original_image_reader(image_path)
+            context['image_analysis'] = result  # Store for specialists
+            return result
+        
+        orchestrator_tools.append(enhanced_image_reader)
     
     # Add specialist tools
     orchestrator_tools.extend([tb_specialist, agriculture_specialist, reject_handler])
