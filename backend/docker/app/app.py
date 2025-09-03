@@ -28,13 +28,12 @@ from datetime import datetime, timezone
 from collections import defaultdict
 
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 from strands import Agent, tool
-from io import StringIO
 
 try:
     from strands_tools import image_reader
@@ -75,15 +74,12 @@ logging.basicConfig(level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def sanitize_log_input(text: str) -> str:
-    """Sanitize user input for logging to prevent log injection."""
-    return text.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')[:500]
-
 def log_to_cloudwatch(message: str, level: str = "INFO", error_details: Optional[Dict] = None):
     if not os.environ.get('LOG_GROUP'):
         print(f"[{level}] {message}")
         return
     try:
+        cloudwatch_logs = boto3.client('logs', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
         stream_name = f"agent-service-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
         try:
             cloudwatch_logs.create_log_stream(
@@ -114,7 +110,6 @@ def log_to_cloudwatch(message: str, level: str = "INFO", error_details: Optional
 bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
-cloudwatch_logs = boto3.client('logs', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 
 KNOWLEDGE_BASE_ID = os.environ.get('KNOWLEDGE_BASE_ID', '')
 FEEDBACK_TABLE_NAME = os.environ.get('FEEDBACK_TABLE_NAME', 'iecho-feedback-table')
@@ -129,15 +124,6 @@ log_to_cloudwatch(f"Application started - LOG_GROUP: {os.environ.get('LOG_GROUP'
 # -----------------------------------------------------------------------------
 from time import time
 conversation_sessions = defaultdict(lambda: {'history': [], 'last_access': time()})
-
-def cleanup_old_sessions():
-    """Clean up sessions older than 1 hour."""
-    now = time()
-    expired_sessions = [sid for sid, data in conversation_sessions.items() 
-                       if now - data['last_access'] > 3600]
-    for sid in expired_sessions:
-        del conversation_sessions[sid]
-    return len(expired_sessions)
 
 # -----------------------------------------------------------------------------
 # Schemas
@@ -183,28 +169,24 @@ Specialist tools (choose one for final response):
 CRITICAL GUARDRAILS:
 1. IMAGE ANALYSIS RULES:
    - If query contains "Image path:", use image_reader FIRST to analyze the image
-   - If image analysis fails, inform user and ask them to describe the image
-   - After image analysis (or failure), evaluate COMBINED context: image content + text query
-   - If EITHER image content OR text query relates to TB/health → use tb_specialist
-   - If EITHER image content OR text query relates to agriculture → use agriculture_specialist
-   - Only use reject_handler if BOTH image content AND text query are unrelated to TB/agriculture
+   - After image analysis, evaluate BOTH the original text query AND image content together
+   - If image shows unrelated content (pets, random objects, people, landscapes, etc.) AND text query is generic ("what is in the image?", "describe this", "what do you see?"), use reject_handler
+   - Only proceed to specialists if image content OR text query relates to TB/agriculture/health
 
 2. TEXT QUERY VALIDATION:
    - Reject queries asking for: personal advice, entertainment, general knowledge unrelated to TB/agriculture
    - Reject requests for: creative writing, jokes, games, programming help, financial advice
    - Reject inappropriate content: offensive language, harmful instructions, illegal activities
 
-3. ROUTING LOGIC (evaluate combined context including conversation history):
-   - Consider current query + conversation history + image content together [Don't forget history!]
-   - If ANY context (image/text/history) mentions TB/health topics → tb_specialist
-   - If ANY context (image/text/history) mentions agriculture topics → agriculture_specialist
-   - If ALL context is unrelated → reject_handler
-   - CRITICAL: For vague follow-up questions with pronouns ("explain them", "tell me more", "can you elaborate"), USE CONVERSATION HISTORY to determine which specialist handled the previous question and route to the SAME specialist
+3. ROUTING LOGIC:
+   - TB/Health-related: symptoms, diagnosis, treatment, prevention, patient care, nutrition, public health → tb_specialist
+   - Agriculture-related: crops, farming, irrigation, soil, food safety, livestock → agriculture_specialist
+   - Everything else → reject_handler
 
 4. OUTPUT RULES:
    - Always end with exactly one specialist tool call for the final response
+   - NEVER show tool calls, reasoning, or internal processes to the user
    - Only return the clean, helpful response from the specialist
-   - NEVER route vague follow-up questions to reject_handler if conversation history shows previous TB/agriculture context
 """
 
 TB_AGENT_PROMPT = """You are a TB and Health specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
@@ -247,9 +229,6 @@ def filter_thinking_tags(text: str) -> str:
     text = re.sub(r'Action: [^\n]*\n?', '', text)
     # Remove decision tokens and any following newlines
     text = re.sub(r'^\s*<(TB|AG|REJECT)>\s*\n*', '', text)
-    # Remove standalone > characters that leak from thinking tags
-    text = re.sub(r'^\s*>\s*$', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*>\s*\n', '', text, flags=re.MULTILINE)
     return text.strip()
 
 
@@ -284,14 +263,12 @@ def query_knowledge_base(query: str, topic: str, conversation_history: List[str]
         return {'output': {'text': f"I’m having trouble accessing the knowledge base right now. Error: {str(e)}"}}
 
 # --- Stream helpers (reasoning suppression & tool selection tracking) ----------
-SPECIALIST_TOOLS = {'tb_specialist', 'agriculture_specialist', 'reject_handler'}
-
 class ToolChoiceTracker:
     def __init__(self):
         self.name: Optional[str] = None
     def set(self, name: Optional[str]):
         # Only track specialist tools, not analysis tools
-        if name and name in SPECIALIST_TOOLS:
+        if name and name in ['tb_specialist', 'agriculture_specialist', 'reject_handler']:
             self.name = name
 
 def make_streaming_callback(on_tool_start: Optional[Callable[[str], None]] = None):
@@ -322,10 +299,9 @@ def make_kb_tool(topic: str, citations_sink: list, conversation_history: List[st
     @tool
     async def kb_search(user_query: str) -> str:
         """Search iECHO Knowledge Base for this specialty and return a concise answer with citations tracked internally."""
-        logger.info(f"KB lookup topic='{topic}' for query='{sanitize_log_input(user_query)}'")
+        logger.info(f"KB lookup topic='{topic}' for query='{user_query[:120]}'")
         kb_response = query_knowledge_base(user_query, topic, conversation_history)
-        # Build new citations list to avoid race conditions
-        new_citations = []
+        citations_sink.clear()
         seen_sources = set()
         for citation in kb_response.get('citations', []):
             for reference in citation.get('retrievedReferences', []):
@@ -336,13 +312,9 @@ def make_kb_tool(topic: str, citations_sink: list, conversation_history: List[st
                 # Only add unique sources
                 if doc_uri and doc_uri not in seen_sources:
                     seen_sources.add(doc_uri)
-                    new_citations.append({
+                    citations_sink.append({
                         'title': title, 'source': doc_uri, 'excerpt': content_text
                     })
-        
-        # Replace citations atomically
-        citations_sink.clear()
-        citations_sink.extend(new_citations)
         return kb_response['output']['text']
     return kb_search
 
@@ -351,15 +323,13 @@ def build_specialists(conversation_history: List[str]):
     tb_citations: List[Dict] = []
     agri_citations: List[Dict] = []
 
-    # Separate conversation managers for each agent to prevent state interference
+    # In-memory conversation manager - prioritize SlidingWindow for medical/agricultural precision
     if SlidingWindowConversationManager is not None:
-        tb_conv_mgr = SlidingWindowConversationManager(window_size=20, should_truncate_results=True)
-        agri_conv_mgr = SlidingWindowConversationManager(window_size=20, should_truncate_results=True)
+        conv_mgr = SlidingWindowConversationManager(window_size=20, should_truncate_results=True)
     elif SummarizingConversationManager is not None:
-        tb_conv_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
-        agri_conv_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
+        conv_mgr = SummarizingConversationManager(preserve_recent_messages=10, summary_ratio=0.3)
     else:
-        tb_conv_mgr = agri_conv_mgr = None
+        conv_mgr = None
 
     # Build tools list (no image_reader at specialist level)
     tb_tools = [make_kb_tool("tuberculosis", tb_citations, conversation_history)]
@@ -369,14 +339,14 @@ def build_specialists(conversation_history: List[str]):
         system_prompt=TB_AGENT_PROMPT,
         tools=tb_tools,
         model="us.amazon.nova-lite-v1:0",
-        conversation_manager=tb_conv_mgr,
+        conversation_manager=conv_mgr,
     )
 
     agri_agent = Agent(
         system_prompt=AGRICULTURE_AGENT_PROMPT,
         tools=agri_tools,
         model="us.amazon.nova-lite-v1:0",
-        conversation_manager=agri_conv_mgr,
+        conversation_manager=conv_mgr,
     )
 
     return {
@@ -392,11 +362,11 @@ def build_orchestrator_tools(conversation_history: List[str]):
     specialists = build_specialists(conversation_history)
 
     # Store image analysis result to pass to specialists and logs
-    context = {'image_analysis': None, 'original_query': None}
+    context = {'image_analysis': None}
     
     async def _run_agent_and_capture(agent: Agent, query: str) -> str:
         """Run a specialist agent once and capture visible text only (reasoning suppressed)."""
-        buffer = StringIO()
+        buffer: List[str] = []
         async for ev in agent.stream_async(query):
             if ev.get("reasoning") or ev.get("force_stop") or ev.get("error") or ev.get("exception"):
                 continue
@@ -404,8 +374,8 @@ def build_orchestrator_tools(conversation_history: List[str]):
                 chunk = ev["data"]
                 if "<thinking>" in chunk or "</thinking>" in chunk:
                     continue
-                buffer.write(chunk)
-        return filter_thinking_tags(buffer.getvalue())
+                buffer.append(chunk)
+        return filter_thinking_tags("".join(buffer))
 
 
     
@@ -413,21 +383,13 @@ def build_orchestrator_tools(conversation_history: List[str]):
     async def tb_specialist(user_query: str) -> str:
         """TB specialist agent: diagnosis, tests, protocols, MDR/XDR, prevention, patient counseling."""
         agent, _ = specialists["tb"]
-        # Include image analysis if available
-        enhanced_query = user_query
-        if context['image_analysis']:
-            enhanced_query = f"Image analysis: {context['image_analysis']}\n\nUser query: {user_query}"
-        return await _run_agent_and_capture(agent, enhanced_query)
+        return await _run_agent_and_capture(agent, user_query)
 
     @tool
     async def agriculture_specialist(user_query: str) -> str:
         """Agriculture specialist agent: crop/soil mgmt, irrigation, IPM, yield, food safety & nutrition, infrastructure."""
         agent, _ = specialists["agri"]
-        # Include image analysis if available
-        enhanced_query = user_query
-        if context['image_analysis']:
-            enhanced_query = f"Image analysis: {context['image_analysis']}\n\nUser query: {user_query}"
-        return await _run_agent_and_capture(agent, enhanced_query)
+        return await _run_agent_and_capture(agent, user_query)
 
 
 
@@ -458,18 +420,6 @@ def build_orchestrator_tools(conversation_history: List[str]):
 # -----------------------------------------------------------------------------
 # Follow-up generation (unchanged logic; reasoning suppressed by filtering)
 # -----------------------------------------------------------------------------
-# Reusable agent for follow-up questions
-_followup_agent = None
-
-def get_followup_agent():
-    global _followup_agent
-    if _followup_agent is None:
-        _followup_agent = Agent(
-            system_prompt="You are a helpful assistant that generates relevant follow-up questions. Be concise and practical.",
-            model="us.amazon.nova-lite-v1:0"
-        )
-    return _followup_agent
-
 async def generate_follow_up_questions(response_text: str, original_query: str, conversation_history: List[str]) -> List[str]:
     try:
         context = f"Original question: {original_query}\nResponse: {response_text}"
@@ -489,7 +439,10 @@ Generate questions that:
 
 Format: Return only the questions, one per line, without numbers or bullets."""
 
-        agent = get_followup_agent()
+        agent = Agent(
+            system_prompt="You are a helpful assistant that generates relevant follow-up questions. Be concise and practical.",
+            model="us.amazon.nova-lite-v1:0"
+        )
 
         buf: List[str] = []
         async for ev in agent.stream_async(prompt):
@@ -529,9 +482,15 @@ Format: Return only the questions, one per line, without numbers or bullets."""
 # Orchestrator (Streaming)
 # -----------------------------------------------------------------------------
 async def run_orchestrator_agent(query: str, session_id: str, user_id: str, image: Optional[str] = None):
+    # GC old sessions (1h)
+    now = time()
+    for sid, data in list(conversation_sessions.items()):
+        if now - data['last_access'] > 3600:
+            del conversation_sessions[sid]
+
     # Session state
     sess = conversation_sessions[session_id]
-    sess['last_access'] = time()
+    sess['last_access'] = now
     history = sess['history']
     
     # Save image to temp file for image_reader tool
@@ -557,17 +516,12 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
         try:
             with os.fdopen(temp_fd, 'wb') as f:
                 f.write(img_data)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(temp_path, 0o600)
+            os.chmod(temp_path, 0o644)
             query = f"Image path: {temp_path}\n{query}"
         except Exception as e:
             if temp_path and os.path.exists(temp_path):
                 os.unlink(temp_path)
             raise e
-    
-    # Add current query to history before orchestrator runs so it has full context
-    history.append(f"User: {query}")
     
     tools, get_last_citations, image_context = build_orchestrator_tools(history)
 
@@ -582,7 +536,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     context_prompt = ORCHESTRATOR_PROMPT
     if history:
         recent = "\n".join(history[-4:])
-        context_prompt += f"\n\nConversation history:\n{recent}\n\nIMPORTANT: For follow-up questions, continue with the same specialist that handled the previous related question."
+        context_prompt += f"\n\nConversation history:\n{recent}"
 
     # Track selected tool via callback (no text emitted here)
     tracker = ToolChoiceTracker()
@@ -653,7 +607,8 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
 
     full_text = filter_thinking_tags(full_text)
 
-    # Update session history with response (query already added above)
+    # Update session history
+    history.append(f"User: {query}")
     history.append(f"Assistant: {full_text}")
 
     # Citations from the specialist that actually ran (or None)
@@ -671,8 +626,8 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
         log_query = f"[IMAGE_PROVIDED] {query}"
     
     log_message = (
-        f"Chat complete - User ID: {sanitize_log_input(user_id)}, Session ID: {sanitize_log_input(session_id)}, Response ID: {response_id}, "
-        f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {sanitize_log_input(log_query)}, Response: {sanitize_log_input(full_text)}, "
+        f"Chat complete - User ID: {user_id}, Session ID: {session_id}, Response ID: {response_id}, "
+        f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {log_query}, Response: {full_text}, "
         f"Citations: {json.dumps(citations) if citations else '[]'}"
     )
     logger.info(log_message)
@@ -682,8 +637,8 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     if temp_path and os.path.exists(temp_path):
         try:
             os.unlink(temp_path)
-        except OSError:
-            logger.warning(f"Failed to cleanup temp file: {temp_path}")
+        except:
+            pass
     
     yield json.dumps({
         "response": full_text,
@@ -721,9 +676,7 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
         try:
             with os.fdopen(temp_fd, 'wb') as f:
                 f.write(img_data)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(temp_path, 0o600)
+            os.chmod(temp_path, 0o644)
         except Exception as e:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
@@ -775,8 +728,8 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
     if temp_path and os.path.exists(temp_path):
         try:
             os.unlink(temp_path)
-        except OSError:
-            logger.warning(f"Failed to cleanup temp file: {temp_path}")
+        except:
+            pass
     
     return text, citations, tracker.name
 
@@ -792,7 +745,7 @@ def health_check():
     }
 
 @app.post('/chat')
-async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
+async def chat(request: ChatRequest):
     try:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
@@ -806,18 +759,15 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
 
         session_id = request.sessionId or str(uuid4())
         response_id = str(uuid4())
-        background_tasks.add_task(cleanup_old_sessions)
 
         sess = conversation_sessions[session_id]
         sess['last_access'] = time()
         history = sess['history']
-        
-        # Add current query to history before orchestrator runs
-        history.append(f"User: {request.query}")
 
         response_text, citations, chosen_tool = await run_orchestrator_once(request.query, history, request.image)
 
-        # Update history with response
+        # Update history
+        history.append(f"User: {request.query}")
         history.append(f"Assistant: {response_text}")
 
         followups = await generate_follow_up_questions(response_text, request.query, history)
@@ -828,8 +778,8 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
             log_query = f"[IMAGE_PROVIDED] {request.query}"
         
         log_message = (
-            f"Chat complete - User: {sanitize_log_input(request.userId)}, Session ID: {sanitize_log_input(session_id)}, Response ID: {response_id}, "
-            f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {sanitize_log_input(log_query)}, Response: {sanitize_log_input(response_text)}, "
+            f"Chat complete - User: {request.userId}, Session ID: {session_id}, Response ID: {response_id}, "
+            f"SelectedAgent: {chosen_tool or 'unknown'}, Query: {log_query}, Response: {response_text}, "
             f"Citations: {json.dumps(citations) if citations else '[]'}"
         )
         logger.info(log_message)
@@ -856,10 +806,10 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
         }
         log_to_cloudwatch("Chat endpoint error", "ERROR", error_details)
         logger.error(f"Error in chat endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post('/chat-stream')
-async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks):
+async def chat_stream(request: ChatRequest):
     try:
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
@@ -872,7 +822,6 @@ async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks):
             raise HTTPException(status_code=500, detail="Knowledge Base not configured")
 
         session_id = request.sessionId or str(uuid4())
-        background_tasks.add_task(cleanup_old_sessions)
         return StreamingResponse(
             run_orchestrator_agent(request.query, session_id, request.userId, request.image),
             media_type="application/x-ndjson"
@@ -890,7 +839,7 @@ async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks):
         }
         log_to_cloudwatch("Chat-stream endpoint error", "ERROR", error_details)
         logger.error(f"Error in chat-stream endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post('/feedback')
 async def submit_feedback(request: FeedbackRequest):
@@ -909,8 +858,8 @@ async def submit_feedback(request: FeedbackRequest):
         }
         table.put_item(Item=item)
 
-        log_message = (f"Feedback submitted - User: {sanitize_log_input(request.userId)}, Response ID: {sanitize_log_input(request.responseId)}, "
-                       f"Rating: {request.rating}, Feedback: {sanitize_log_input(request.feedback or 'None')}, "
+        log_message = (f"Feedback submitted - User: {request.userId}, Response ID: {request.responseId}, "
+                       f"Rating: {request.rating}, Feedback: {request.feedback or 'None'}, "
                        f"Feedback ID: {item['feedbackId']}")
         logger.info(log_message)
         log_to_cloudwatch(log_message)
@@ -928,7 +877,7 @@ async def submit_feedback(request: FeedbackRequest):
         }
         log_to_cloudwatch("Feedback endpoint error", "ERROR", error_details)
         logger.error(f"Error in feedback endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get('/documents')
 async def list_documents():
@@ -970,7 +919,7 @@ async def list_documents():
         }
         log_to_cloudwatch("Documents endpoint error", "ERROR", error_details)
         logger.error(f"Error in documents endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get('/document-url/{path:path}')
 async def get_document_url(path: str):
@@ -980,8 +929,6 @@ async def get_document_url(path: str):
         parts = path.replace('s3://', '').split('/', 1)
         bucket = parts[0]
         key = parts[1] if len(parts) > 1 else ''
-        if not key:
-            raise HTTPException(status_code=400, detail="Invalid S3 path - missing object key")
         url = s3.generate_presigned_url('get_object', Params={'Bucket': bucket, 'Key': key}, ExpiresIn=3600)
         return {"url": url}
     except Exception as e:
@@ -993,7 +940,7 @@ async def get_document_url(path: str):
         }
         log_to_cloudwatch("Document URL generation error", "ERROR", error_details)
         logger.error(f"Error generating presigned URL: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to generate document URL")
+        raise HTTPException(status_code=500, detail=f"Failed to generate document URL: {str(e)}")
 
 @app.get('/status')
 async def get_status():
@@ -1001,7 +948,7 @@ async def get_status():
         "service": "iECHO RAG Chatbot API",
         "status": "running",
         "knowledgeBaseConfigured": bool(KNOWLEDGE_BASE_ID),
-        "documentsConfigured": bool(os.environ.get('DOCUMENTS_BUCKET_NAME')),
+        "documentsConfigured": bool(KNOWLEDGE_BASE_ID),
         "feedbackConfigured": bool(FEEDBACK_TABLE_NAME),
 
         "region": os.environ.get('AWS_REGION', 'us-west-2'),
@@ -1011,3 +958,5 @@ async def get_status():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
     uvicorn.run(app, host='0.0.0.0', port=port)
+
+
