@@ -145,10 +145,17 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
       setShowThinking(true);
     } else if (message.thinking && !message.isThinking) {
       // Delay collapse to let user see completion
-      const timer = setTimeout(() => setShowThinking(false), 1000);
+      const timer = setTimeout(() => setShowThinking(false), 2000);
       return () => clearTimeout(timer);
     }
-  }, [message.isThinking, message.thinking]);
+  }, [message.isThinking]);
+  
+  // Keep expanded while thinking content is being streamed
+  useEffect(() => {
+    if (message.thinking && message.isThinking) {
+      setShowThinking(true);
+    }
+  }, [message.thinking, message.isThinking]);
   
   return (
     <>
