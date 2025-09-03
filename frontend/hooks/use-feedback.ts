@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { config } from '../lib/config'
+import { config, getApiEndpoint } from '../lib/config'
 
 interface ApiError {
   detail: string;
@@ -35,7 +35,7 @@ export function useFeedback() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const response = await fetch(`${config.apiUrl}/feedback`, {
+      const response = await fetch(getApiEndpoint('/feedback'), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

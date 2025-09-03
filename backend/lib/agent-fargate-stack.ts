@@ -553,7 +553,7 @@ frontend:
       environmentVariables: [
         {
           name: "NEXT_PUBLIC_API_BASE_URL",
-          value: api.url
+          value: api.urlForPath('')
         }
       ]
     });
@@ -569,7 +569,7 @@ frontend:
     // Note: Repository connection via GitHub App must be done manually in Amplify console
 
     // Outputs
-    this.exportValue(api.url, { name: "ApiGatewayUrl", description: "The API Gateway URL" });
+    this.exportValue(api.urlForPath(''), { name: "ApiGatewayUrl", description: "The API Gateway URL" });
     this.exportValue(cluster.clusterName, { name: "AgentClusterName", description: "The name of the EKS cluster" });
     this.exportValue(cluster.clusterEndpoint, { name: "AgentClusterEndpoint", description: "The endpoint of the EKS cluster" });
     this.exportValue(masterRole.roleArn, { name: "ClusterMasterRoleArn", description: "The master role ARN for kubectl access" });

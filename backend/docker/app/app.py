@@ -498,7 +498,6 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     if image:
         import tempfile
         import base64
-        import os
         # Detect image format from base64 data
         img_data = base64.b64decode(image)
         if img_data.startswith(b'\x89PNG'):
@@ -658,7 +657,6 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
     if image:
         import tempfile
         import base64
-        import os
         # Detect image format from base64 data
         img_data = base64.b64decode(image)
         if img_data.startswith(b'\x89PNG'):

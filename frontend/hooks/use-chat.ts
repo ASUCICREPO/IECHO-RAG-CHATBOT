@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import session from '../utils/session'
-import { config } from '../lib/config'
+import { config, getApiEndpoint } from '../lib/config'
 
 const { getOrCreateSessionId } = session;
 
@@ -87,7 +87,7 @@ export function useChat() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      const response = await fetch(`${config.apiUrl}/chat-stream`, {
+      const response = await fetch(getApiEndpoint('/chat-stream'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
