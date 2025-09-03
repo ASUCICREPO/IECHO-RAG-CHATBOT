@@ -60,7 +60,7 @@ class AgentAppChart extends cdk8s.Chart {
         labels: { app: "agent-service" }
       },
       spec: {
-        replicas: 1,
+        replicas: 2,
         selector: { matchLabels: { app: "agent-service" } },
         template: {
           metadata: { labels: { app: "agent-service" } },
@@ -114,68 +114,7 @@ class AgentAppChart extends cdk8s.Chart {
       }
     });
 
-    // Horizontal Pod Autoscaler
-    new cdk8s.ApiObject(this, "hpa", {
-      apiVersion: "autoscaling/v2",
-      kind: "HorizontalPodAutoscaler",
-      metadata: {
-        name: "agent-service-hpa",
-        namespace: props.namespace
-      },
-      spec: {
-        scaleTargetRef: {
-          apiVersion: "apps/v1",
-          kind: "Deployment",
-          name: "agent-service"
-        },
-        minReplicas: 1,
-        maxReplicas: 4,
-        metrics: [
-          {
-            type: "Resource",
-            resource: {
-              name: "cpu",
-              target: {
-                type: "Utilization",
-                averageUtilization: 70
-              }
-            }
-          },
-          {
-            type: "Resource",
-            resource: {
-              name: "memory",
-              target: {
-                type: "Utilization",
-                averageUtilization: 80
-              }
-            }
-          }
-        ],
-        behavior: {
-          scaleUp: {
-            stabilizationWindowSeconds: 60,
-            policies: [
-              {
-                type: "Percent",
-                value: 100,
-                periodSeconds: 15
-              }
-            ]
-          },
-          scaleDown: {
-            stabilizationWindowSeconds: 300,
-            policies: [
-              {
-                type: "Percent",
-                value: 50,
-                periodSeconds: 60
-              }
-            ]
-          }
-        }
-      }
-    });
+
 
     // Ingress
     new cdk8s.ApiObject(this, "ingress", {
@@ -515,26 +454,7 @@ export class AgentEksFargateStack extends Stack {
     });
     albChart.node.addDependency(albServiceAccount);
 
-    // Metrics Server for HPA
-    const metricsServerChart = cluster.addHelmChart("MetricsServer", {
-      chart: "metrics-server",
-      repository: "https://kubernetes-sigs.github.io/metrics-server/",
-      namespace: "kube-system",
-      release: "metrics-server",
-      version: "3.12.1",
-      values: {
-        args: [
-          "--cert-dir=/tmp",
-          "--secure-port=4443",
-          "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
-          "--kubelet-use-node-status-port",
-          "--metric-resolution=15s"
-        ]
-      },
-      timeout: Duration.minutes(10),
-      wait: true,
-      createNamespace: false,
-    });
+
 
     // Use cdk8s for proper Kubernetes resource management
     const cdk8sApp = new cdk8s.App();
@@ -557,7 +477,6 @@ export class AgentEksFargateStack extends Stack {
     // cdk8s chart dependencies
     agentChart.node.addDependency(fargateProfile);
     agentChart.node.addDependency(albChart);
-    agentChart.node.addDependency(metricsServerChart);
     albChart.node.addDependency(cluster.awsAuth);
 
     // No finalizer patch needed - proper dependency ordering handles cleanup
