@@ -175,7 +175,7 @@ function ChatMessage({ message, onRate, onFollowUpClick, onRetry }: {
           {/* Thinking Section */}
           {message.sender === 'ai' && (message.thinking || message.isThinking) && (
             <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
-              <div className="w-full px-3 py-2 bg-gray-100 flex items-center gap-2 text-sm text-gray-600">
+              <div className="w-full px-3 py-2 bg-gray-100 flex items-center gap-2 text-xs sm:text-sm text-gray-600">
                 {message.isThinking ? (
                   <>
                     <span>Thinking...</span>
