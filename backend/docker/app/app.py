@@ -194,10 +194,12 @@ CRITICAL GUARDRAILS:
    - Reject requests for: creative writing, jokes, games, programming help, financial advice
    - Reject inappropriate content: offensive language, harmful instructions, illegal activities
 
-3. ROUTING LOGIC (evaluate combined context):
-   - If image OR text mentions TB/health topics → tb_specialist
-   - If image OR text mentions agriculture topics → agriculture_specialist
-   - If BOTH image AND text are unrelated → reject_handler
+3. ROUTING LOGIC (evaluate combined context including conversation history):
+   - Consider current query + conversation history + image content together
+   - If ANY context (image/text/history) mentions TB/health topics → tb_specialist
+   - If ANY context (image/text/history) mentions agriculture topics → agriculture_specialist
+   - If ALL context is unrelated → reject_handler
+   - Follow-up questions should use same specialist as previous related questions
 
 4. OUTPUT RULES:
    - Always end with exactly one specialist tool call for the final response
@@ -244,6 +246,9 @@ def filter_thinking_tags(text: str) -> str:
     text = re.sub(r'Action: [^\n]*\n?', '', text)
     # Remove decision tokens and any following newlines
     text = re.sub(r'^\s*<(TB|AG|REJECT)>\s*\n*', '', text)
+    # Remove standalone > characters that leak from thinking tags
+    text = re.sub(r'^\s*>\s*$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*>\s*\n', '', text, flags=re.MULTILINE)
     return text.strip()
 
 
@@ -573,7 +578,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     context_prompt = ORCHESTRATOR_PROMPT
     if history:
         recent = "\n".join(history[-4:])
-        context_prompt += f"\n\nConversation history:\n{recent}"
+        context_prompt += f"\n\nConversation history (use this to maintain context for follow-up questions):\n{recent}\n\nIMPORTANT: If the current query is a follow-up to a previous TB or agriculture topic, route to the same specialist."
 
     # Track selected tool via callback (no text emitted here)
     tracker = ToolChoiceTracker()
