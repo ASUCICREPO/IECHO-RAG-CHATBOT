@@ -181,8 +181,7 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
               >
                 {message.isThinking ? (
                   <>
-                    <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span>Thinking...</span>
+                    <span>💭 Thinking...</span>
                   </>
                 ) : (
                   <>
