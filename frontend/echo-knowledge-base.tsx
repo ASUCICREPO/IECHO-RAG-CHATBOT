@@ -139,6 +139,13 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
 }) {
   const [showThinking, setShowThinking] = useState(false);
   
+  // Auto-expand when thinking starts
+  useEffect(() => {
+    if (message.isThinking) {
+      setShowThinking(true);
+    }
+  }, [message.isThinking]);
+  
   return (
     <>
       <div className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-4 items-start gap-3`}>
@@ -177,9 +184,9 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
                     <span>💭 View reasoning</span>
                   </>
                 )}
-                <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${message.thinking ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${(showThinking || message.isThinking) ? 'rotate-180' : ''}`} />
               </button>
-              {message.thinking && (
+              {(showThinking || message.isThinking) && message.thinking && (
                 <div className="px-3 py-2 text-sm text-gray-600 italic border-t border-gray-200">
                   {message.thinking}
                 </div>
