@@ -195,7 +195,7 @@ CRITICAL GUARDRAILS:
    - Reject inappropriate content: offensive language, harmful instructions, illegal activities
 
 3. ROUTING LOGIC (evaluate combined context including conversation history):
-   - Consider current query + conversation history + image content together
+   - Consider current query + conversation history + image content together [Don't forget history!]
    - If ANY context (image/text/history) mentions TB/health topics → tb_specialist
    - If ANY context (image/text/history) mentions agriculture topics → agriculture_specialist
    - If ALL context is unrelated → reject_handler
@@ -578,7 +578,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     context_prompt = ORCHESTRATOR_PROMPT
     if history:
         recent = "\n".join(history[-4:])
-        context_prompt += f"\n\nConversation history (use this to maintain context for follow-up questions):\n{recent}\n\nIMPORTANT: If the current query is a follow-up to a previous TB or agriculture topic, route to the same specialist."
+        context_prompt += f"\n\nConversation history:\n{recent}\n\nIMPORTANT: For follow-up questions, continue with the same specialist that handled the previous related question."
 
     # Track selected tool via callback (no text emitted here)
     tracker = ToolChoiceTracker()
