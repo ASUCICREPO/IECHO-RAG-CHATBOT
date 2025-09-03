@@ -187,7 +187,7 @@ function ChatMessage({ message, onRate, onFollowUpClick, onRetry }: {
                 )}
               </div>
               {message.thinking && (
-                <div className="px-3 py-2 text-sm text-gray-600 italic border-t border-gray-200">
+                <div className="px-3 py-2 text-sm text-gray-600 italic border-t border-gray-200 max-h-20 overflow-y-auto">
                   {message.thinking}
                 </div>
               )}
