@@ -338,14 +338,14 @@ def build_specialists(conversation_history: List[str]):
     tb_agent = Agent(
         system_prompt=TB_AGENT_PROMPT,
         tools=tb_tools,
-        model="us.amazon.nova-lite-v1:0",
+        model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
     )
 
     agri_agent = Agent(
         system_prompt=AGRICULTURE_AGENT_PROMPT,
         tools=agri_tools,
-        model="us.amazon.nova-lite-v1:0",
+        model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
     )
 
@@ -441,7 +441,7 @@ Format: Return only the questions, one per line, without numbers or bullets."""
 
         agent = Agent(
             system_prompt="You are a helpful assistant that generates relevant follow-up questions. Be concise and practical.",
-            model="us.amazon.nova-lite-v1:0"
+            model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0"
         )
 
         buf: List[str] = []
@@ -548,7 +548,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     orchestrator = Agent(
         system_prompt=context_prompt,
         tools=tools,
-        model="us.amazon.nova-lite-v1:0",
+        model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
         conversation_manager=orch_mgr,
         callback_handler=cb
     )
@@ -701,7 +701,7 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
     orchestrator = Agent(
         system_prompt=ORCHESTRATOR_PROMPT,
         tools=tools,
-        model="us.amazon.nova-lite-v1:0",
+        model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
         conversation_manager=orch_mgr,
         callback_handler=cb
     )
