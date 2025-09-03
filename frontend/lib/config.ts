@@ -7,6 +7,15 @@ if (!config.apiUrl) {
 }
 
 export const getApiEndpoint = (path: string = '') => {
-  const baseUrl = config.apiUrl.endsWith('/') ? config.apiUrl.slice(0, -1) : config.apiUrl;
-  return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+  if (!config.apiUrl) {
+    return path;
+  }
+  
+  // Remove trailing slash from base URL
+  const baseUrl = config.apiUrl.replace(/\/$/, '');
+  
+  // Ensure path starts with /
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  
+  return `${baseUrl}${normalizedPath}`;
 };
