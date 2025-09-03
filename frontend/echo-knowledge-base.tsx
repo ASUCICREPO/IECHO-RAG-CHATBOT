@@ -139,12 +139,13 @@ function ChatMessage({ message, onRate, onFollowUpClick }: {
 }) {
   const [showThinking, setShowThinking] = useState(false);
   
-  // Auto-expand when thinking starts, auto-collapse when complete
+  // Force expand when thinking starts or has content
   useEffect(() => {
-    if (message.isThinking) {
+    if (message.isThinking || message.thinking) {
       setShowThinking(true);
-    } else if (message.thinking && !message.isThinking) {
-      // Delay collapse after thinking completes
+    }
+    if (!message.isThinking && message.thinking) {
+      // Auto-collapse after thinking completes
       const timer = setTimeout(() => setShowThinking(false), 2000);
       return () => clearTimeout(timer);
     }
