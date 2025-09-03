@@ -34,6 +34,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 from strands import Agent, tool
+from strands_tools import retrieve
 
 try:
     from strands_tools import image_reader
@@ -107,7 +108,6 @@ def log_to_cloudwatch(message: str, level: str = "INFO", error_details: Optional
 # -----------------------------------------------------------------------------
 # AWS clients & env
 # -----------------------------------------------------------------------------
-bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 
@@ -189,21 +189,21 @@ CRITICAL GUARDRAILS:
    - Only return the clean, helpful response from the specialist
 """
 
-TB_AGENT_PROMPT = """You are a TB and Health specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
+TB_AGENT_PROMPT = """You are a TB and Health specialist. ALWAYS use the retrieve tool to get relevant information from the knowledge base, then provide brief, direct answers about:
 - TB diagnosis & symptoms; lab tests (smear, GeneXpert), imaging
 - Treatment protocols & medications (e.g., HRZE, MDR/XDR management)
 - Infection control & prevention strategies
 - Patient care guidelines & counseling
-Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.
-If image analysis results are provided in the query, use them as additional context.
+Keep responses concise (2–3 sentences). When the retrieve tool provides Document IDs or sources, mention them in your response.
+Do NOT reveal internal reasoning. If image analysis results are provided in the query, use them as additional context.
 """
 
-AGRICULTURE_AGENT_PROMPT = """You are an Agriculture specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
+AGRICULTURE_AGENT_PROMPT = """You are an Agriculture specialist. ALWAYS use the retrieve tool to get relevant information from the knowledge base, then provide brief, direct answers about:
 - Crop & soil management, irrigation, fertigation, IPM, yield optimization
 - Food safety & nutrition, post-harvest handling
 - Practical farm best practices & infrastructure
-Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.
-If image analysis results are provided in the query, use them as additional context.
+Keep responses concise (2–3 sentences). When the retrieve tool provides Document IDs or sources, mention them in your response.
+Do NOT reveal internal reasoning. If image analysis results are provided in the query, use them as additional context.
 """
 
 # -----------------------------------------------------------------------------
@@ -230,37 +230,6 @@ def filter_thinking_tags(text: str) -> str:
     # Remove decision tokens and any following newlines
     text = re.sub(r'^\s*<(TB|AG|REJECT)>\s*\n*', '', text)
     return text.strip()
-
-
-
-def query_knowledge_base(query: str, topic: str, conversation_history: List[str]) -> Dict:
-    """Query Bedrock KB (topic used for logging/agent specialization context)."""
-    try:
-        context_query = query
-        if conversation_history:
-            recent_user = [h for h in conversation_history[-4:] if h.startswith('User:')]
-            if recent_user:
-                context_query = f"Previous question: {recent_user[-1]}\nCurrent question: {query}"
-            else:
-                context_query = f"Context: {' '.join(conversation_history[-2:])}\n\nCurrent question: {query}"
-        request_config = {
-            'input': {'text': context_query},
-            'retrieveAndGenerateConfiguration': {
-                'type': 'KNOWLEDGE_BASE',
-                'knowledgeBaseConfiguration': {
-                    'knowledgeBaseId': KNOWLEDGE_BASE_ID,
-                    'modelArn': f'arn:aws:bedrock:{os.environ.get("AWS_REGION", "us-west-2")}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0'
-                }
-            }
-        }
-        
-
-        
-        resp = bedrock_agent_runtime.retrieve_and_generate(**request_config)
-        return resp
-    except Exception as e:
-        logger.error(f"KB query error: {e}")
-        return {'output': {'text': f"I’m having trouble accessing the knowledge base right now. Error: {str(e)}"}}
 
 # --- Stream helpers (reasoning suppression & tool selection tracking) ----------
 class ToolChoiceTracker:
@@ -294,29 +263,7 @@ def make_streaming_callback(on_tool_start: Optional[Callable[[str], None]] = Non
 # Specialists & Agents-as-tools
 # -----------------------------------------------------------------------------
 
-def make_kb_tool(topic: str, citations_sink: list, conversation_history: List[str]):
-    """Returns a KB search tool bound to a specific specialty."""
-    @tool
-    async def kb_search(user_query: str) -> str:
-        """Search iECHO Knowledge Base for this specialty and return a concise answer with citations tracked internally."""
-        logger.info(f"KB lookup topic='{topic}' for query='{user_query[:120]}'")
-        kb_response = query_knowledge_base(user_query, topic, conversation_history)
-        citations_sink.clear()
-        seen_sources = set()
-        for citation in kb_response.get('citations', []):
-            for reference in citation.get('retrievedReferences', []):
-                content_text = reference.get('content', {}).get('text', '')
-                doc_uri = reference.get('location', {}).get('s3Location', {}).get('uri', '')
-                title = doc_uri.split('/')[-1].replace('.pdf', '') if doc_uri else 'Document'
-                
-                # Only add unique sources
-                if doc_uri and doc_uri not in seen_sources:
-                    seen_sources.add(doc_uri)
-                    citations_sink.append({
-                        'title': title, 'source': doc_uri, 'excerpt': content_text
-                    })
-        return kb_response['output']['text']
-    return kb_search
+
 
 def build_specialists(conversation_history: List[str]):
     """Create 2 specialist Agents, each with its own KB tool & citations sink."""
@@ -331,9 +278,13 @@ def build_specialists(conversation_history: List[str]):
     else:
         conv_mgr = None
 
-    # Build tools list (no image_reader at specialist level)
-    tb_tools = [make_kb_tool("tuberculosis", tb_citations, conversation_history)]
-    agri_tools = [make_kb_tool("agriculture", agri_citations, conversation_history)]
+    # Use Strands retrieve tool directly
+    kb_retrieve = retrieve(
+        knowledge_base_id=KNOWLEDGE_BASE_ID
+    )
+    
+    tb_tools = [kb_retrieve]
+    agri_tools = [kb_retrieve]
     
     tb_agent = Agent(
         system_prompt=TB_AGENT_PROMPT,
@@ -350,8 +301,8 @@ def build_specialists(conversation_history: List[str]):
     )
 
     return {
-        "tb": (tb_agent, tb_citations),
-        "agri": (agri_agent, agri_citations),
+        "tb": tb_agent,
+        "agri": agri_agent,
     }
 
 def build_orchestrator_tools(conversation_history: List[str]):
@@ -382,13 +333,13 @@ def build_orchestrator_tools(conversation_history: List[str]):
     @tool
     async def tb_specialist(user_query: str) -> str:
         """TB specialist agent: diagnosis, tests, protocols, MDR/XDR, prevention, patient counseling."""
-        agent, _ = specialists["tb"]
+        agent = specialists["tb"]
         return await _run_agent_and_capture(agent, user_query)
 
     @tool
     async def agriculture_specialist(user_query: str) -> str:
         """Agriculture specialist agent: crop/soil mgmt, irrigation, IPM, yield, food safety & nutrition, infrastructure."""
-        agent, _ = specialists["agri"]
+        agent = specialists["agri"]
         return await _run_agent_and_capture(agent, user_query)
 
 
@@ -399,11 +350,8 @@ def build_orchestrator_tools(conversation_history: List[str]):
         return "I'm sorry, but I can only help with questions related to tuberculosis (TB), agriculture, and related health topics. If you have an image related to TB or agriculture, please describe what you'd like to know about it in your question."
 
     def get_last_citations(tool_name: Optional[str]):
-        mapping = {
-            "tb_specialist": specialists["tb"][1],
-            "agriculture_specialist": specialists["agri"][1],
-        }
-        return mapping.get(tool_name, [])
+        # Citations now handled by Strands retrieve tool internally
+        return []
 
     # Build orchestrator tools list
     orchestrator_tools = []
