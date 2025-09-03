@@ -51,11 +51,13 @@ export default function Component() {
       setQuery("");
     }
     
-    await sendMessage(textToSend, selectedImage);
-    
+    // Clear image immediately
+    const imageToSend = selectedImage;
     setSelectedImage(null);
     setImagePreview(null);
     setIsImageUploading(false);
+    
+    await sendMessage(textToSend, imageToSend);
   };
 
   const handleHomeClick = () => {
