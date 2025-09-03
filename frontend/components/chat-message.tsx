@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { config } from "@/lib/config"
 import { 
   ChevronDown, 
   Lightbulb,
@@ -60,7 +61,7 @@ function CitationList({ citations }: { citations: Citation[] }) {
                   onClick={async () => {
                     try {
                       const encodedPath = encodeURIComponent(cite.source);
-                      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/document-url/${encodedPath}`);
+                      const response = await fetch(`${config.apiUrl}/document-url/${encodedPath}`);
                       if (!response.ok) throw new Error(`HTTP ${response.status}`);
                       const data = await response.json();
                       if (data.url) {
