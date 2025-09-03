@@ -583,24 +583,15 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
             if chunk == '<thinking' or chunk.startswith('<thinking'):
                 in_thinking = True
                 yield json.dumps({"type": "thinking_start"}) + "\n"
-                # Send any content after the tag
-                thinking_content = chunk.replace('<thinking>', '').replace('<thinking', '').strip()
-                if thinking_content:
-                    yield json.dumps({"type": "thinking", "data": thinking_content}) + "\n"
                 continue
             elif chunk == '>' and in_thinking and not full_text:
                 # This is likely the closing > of <thinking>
                 continue
-            elif chunk.endswith('</thinking') or chunk == '</thinking':
-                # Send any content before the closing tag
-                thinking_content = chunk.replace('</thinking>', '').replace('</thinking', '').strip()
-                if thinking_content:
-                    yield json.dumps({"type": "thinking", "data": thinking_content}) + "\n"
-                in_thinking = False
-                yield json.dumps({"type": "thinking_end"}) + "\n"
+            elif chunk == '</' or chunk == '</thinking' or chunk == 'thinking':
+                # Parts of closing tag - skip but stay in thinking mode
                 continue
-            elif chunk == '>' and in_thinking:
-                # This is the closing > of </thinking>
+            elif chunk == '>\n' and in_thinking:
+                # This is the final > of </thinking>
                 in_thinking = False
                 yield json.dumps({"type": "thinking_end"}) + "\n"
                 continue
