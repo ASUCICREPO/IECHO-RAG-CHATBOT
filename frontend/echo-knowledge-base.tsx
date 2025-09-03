@@ -633,6 +633,8 @@ export default function Component() {
                       ? { ...msg, thinking: thinkingText }
                       : msg
                   ));
+                  // Add delay to make thinking streaming visible
+                  await new Promise(resolve => setTimeout(resolve, 30));
                 } else if (data.type === 'thinking_end') {
                   setChatHistory(prev => prev.map(msg => 
                     msg.id === aiMessageId 
