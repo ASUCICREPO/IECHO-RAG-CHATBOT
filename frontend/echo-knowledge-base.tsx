@@ -37,6 +37,7 @@ export default function Component() {
     setShowSentConfirmation,
     isFeedbackLoading,
     feedbackError,
+    setFeedbackError,
     submitFeedback,
     openRatingDialog
   } = useFeedback();
@@ -76,7 +77,12 @@ export default function Component() {
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
       <RatingDialog 
         open={showRatingDialog}
-        onOpenChange={setShowRatingDialog}
+        onOpenChange={(open) => {
+          setShowRatingDialog(open);
+          if (!open) {
+            setFeedbackError(null);
+          }
+        }}
         onSubmit={handleFeedbackSubmit}
         isLoading={isFeedbackLoading}
         error={feedbackError}

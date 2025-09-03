@@ -102,6 +102,7 @@ export function useFeedback() {
     setShowSentConfirmation,
     isFeedbackLoading,
     feedbackError,
+    setFeedbackError,
     submitFeedback,
     openRatingDialog
   };

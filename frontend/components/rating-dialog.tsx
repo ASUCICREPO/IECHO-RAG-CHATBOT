@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -17,6 +17,14 @@ interface RatingDialogProps {
 export default function RatingDialog({ open, onOpenChange, onSubmit, isLoading, error }: RatingDialogProps) {
   const [selectedRating, setSelectedRating] = useState(0);
   const [feedback, setFeedback] = useState("");
+
+  // Reset form when dialog opens
+  useEffect(() => {
+    if (open) {
+      setSelectedRating(0);
+      setFeedback("");
+    }
+  }, [open]);
 
   const handleSubmit = () => {
     if (selectedRating === 0) return;
