@@ -183,7 +183,8 @@ Specialist tools (choose one for final response):
 CRITICAL GUARDRAILS:
 1. IMAGE ANALYSIS RULES:
    - If query contains "Image path:", use image_reader FIRST to analyze the image
-   - After image analysis, evaluate COMBINED context: image content + text query
+   - If image analysis fails, inform user and ask them to describe the image
+   - After image analysis (or failure), evaluate COMBINED context: image content + text query
    - If EITHER image content OR text query relates to TB/health → use tb_specialist
    - If EITHER image content OR text query relates to agriculture → use agriculture_specialist
    - Only use reject_handler if BOTH image content AND text query are unrelated to TB/agriculture
@@ -447,9 +448,14 @@ def build_orchestrator_tools(conversation_history: List[str]):
         @tool
         async def enhanced_image_reader(image_path: str) -> str:
             """Analyze images to understand visual content and store results for specialists."""
-            result = await original_image_reader(image_path)
-            context['image_analysis'] = result  # Store for specialists
-            return result
+            try:
+                result = await original_image_reader(image_path)
+                context['image_analysis'] = result  # Store for specialists
+                return result
+            except Exception as e:
+                logger.error(f"Image analysis failed: {e}")
+                context['image_analysis'] = None
+                return f"Image analysis unavailable. Please describe the image content in your question for better assistance."
         
         orchestrator_tools.append(enhanced_image_reader)
     
@@ -560,6 +566,8 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
         try:
             with os.fdopen(temp_fd, 'wb') as f:
                 f.write(img_data)
+                f.flush()
+                os.fsync(f.fileno())
             os.chmod(temp_path, 0o600)
             query = f"Image path: {temp_path}\n{query}"
         except Exception as e:
@@ -720,6 +728,8 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
         try:
             with os.fdopen(temp_fd, 'wb') as f:
                 f.write(img_data)
+                f.flush()
+                os.fsync(f.fileno())
             os.chmod(temp_path, 0o600)
         except Exception as e:
             if os.path.exists(temp_path):
