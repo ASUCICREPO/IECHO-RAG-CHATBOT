@@ -189,7 +189,7 @@ CRITICAL GUARDRAILS:
    - Only return the clean, helpful response from the specialist
 """
 
-TB_AGENT_PROMPT = """You are a TB and Health specialist. ALWAYS use the retrieve tool to get relevant information from the knowledge base, then provide brief, direct answers about:
+TB_AGENT_PROMPT = f"""You are a TB and Health specialist. ALWAYS use the retrieve tool with knowledgeBaseId="{KNOWLEDGE_BASE_ID}" to get relevant information, then provide brief, direct answers about:
 - TB diagnosis & symptoms; lab tests (smear, GeneXpert), imaging
 - Treatment protocols & medications (e.g., HRZE, MDR/XDR management)
 - Infection control & prevention strategies
@@ -198,7 +198,7 @@ Keep responses concise (2–3 sentences). When the retrieve tool provides Docume
 Do NOT reveal internal reasoning. If image analysis results are provided in the query, use them as additional context.
 """
 
-AGRICULTURE_AGENT_PROMPT = """You are an Agriculture specialist. ALWAYS use the retrieve tool to get relevant information from the knowledge base, then provide brief, direct answers about:
+AGRICULTURE_AGENT_PROMPT = f"""You are an Agriculture specialist. ALWAYS use the retrieve tool with knowledgeBaseId="{KNOWLEDGE_BASE_ID}" to get relevant information, then provide brief, direct answers about:
 - Crop & soil management, irrigation, fertigation, IPM, yield optimization
 - Food safety & nutrition, post-harvest handling
 - Practical farm best practices & infrastructure
@@ -279,12 +279,8 @@ def build_specialists(conversation_history: List[str]):
         conv_mgr = None
 
     # Use Strands retrieve tool directly
-    kb_retrieve = retrieve(
-        knowledge_base_id=KNOWLEDGE_BASE_ID
-    )
-    
-    tb_tools = [kb_retrieve]
-    agri_tools = [kb_retrieve]
+    tb_tools = [retrieve]
+    agri_tools = [retrieve]
     
     tb_agent = Agent(
         system_prompt=TB_AGENT_PROMPT,
