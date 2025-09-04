@@ -100,8 +100,14 @@ export default function ChatMessage({ message, onRate, onFollowUpClick, onRetry 
   useEffect(() => {
     if (message.isThinking) {
       setShowThinking(true);
+    } else if (message.thinking && !message.isThinking) {
+      // Auto-minimize after thinking ends
+      const timer = setTimeout(() => {
+        setShowThinking(false);
+      }, 1000);
+      return () => clearTimeout(timer);
     }
-  }, [message.isThinking]);
+  }, [message.isThinking, message.thinking]);
   
   return (
     <>
@@ -125,14 +131,16 @@ export default function ChatMessage({ message, onRate, onFollowUpClick, onRetry 
           
           {message.sender === 'ai' && (message.thinking || message.isThinking) && (
             <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
-              <div className="w-full px-3 py-2 bg-gray-100 flex items-center gap-2 text-xs sm:text-sm text-gray-600">
-                {message.isThinking ? (
-                  <span>Thinking...</span>
-                ) : (
-                  <span>Reasoning</span>
-                )}
-              </div>
-              {message.thinking && (
+              <button 
+                onClick={() => setShowThinking(!showThinking)}
+                className="w-full px-3 py-2 bg-gray-100 flex items-center justify-between text-xs sm:text-sm text-gray-600 hover:bg-gray-200 transition-colors"
+              >
+                <span>
+                  {message.isThinking ? 'Thinking...' : 'Reasoning'}
+                </span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${showThinking ? 'rotate-180' : ''}`} />
+              </button>
+              {showThinking && message.thinking && (
                 <div className="px-3 py-2 text-xs sm:text-sm text-gray-600 italic border-t border-gray-200 max-h-20 overflow-y-auto">
                   {message.thinking}
                 </div>
