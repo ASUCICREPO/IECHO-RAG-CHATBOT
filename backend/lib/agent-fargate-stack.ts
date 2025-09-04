@@ -157,10 +157,9 @@ export class AgentEksFargateStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // VPC
-    const vpc = new ec2.Vpc(this, "AgentVpc", {
-      maxAzs: 2,
-      natGateways: 1,
+    // Use default VPC
+    const vpc = ec2.Vpc.fromLookup(this, "DefaultVpc", {
+      isDefault: true,
     });
 
     // Cluster master role
