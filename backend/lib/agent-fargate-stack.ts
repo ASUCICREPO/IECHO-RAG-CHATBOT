@@ -157,10 +157,9 @@ export class AgentEksFargateStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // VPC
-    const vpc = new ec2.Vpc(this, "AgentVpc", {
-      maxAzs: 2,
-      natGateways: 1,
+    // Use default VPC
+    const vpc = ec2.Vpc.fromLookup(this, "DefaultVpc", {
+      isDefault: true
     });
 
     // Cluster master role
@@ -176,7 +175,7 @@ export class AgentEksFargateStack extends Stack {
       mastersRole: masterRole,
       outputClusterName: true,
       endpointAccess: eks.EndpointAccess.PUBLIC_AND_PRIVATE,
-      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
+      vpcSubnets: [{ subnetType: ec2.SubnetType.PUBLIC }],
       kubectlLayer: new KubectlV32Layer(this, "kubectl"),
       clusterLogging: [
         eks.ClusterLoggingTypes.API,
@@ -267,7 +266,7 @@ export class AgentEksFargateStack extends Stack {
     // Fargate profile with logging
     const fargateProfile = cluster.addFargateProfile("AgentProfile", {
       selectors: [{ namespace: k8sAppNameSpace, labels: { app: "agent-service" } }],
-      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      subnetSelection: { subnetType: ec2.SubnetType.PUBLIC },
       fargateProfileName: "agent-profile",
     });
 
