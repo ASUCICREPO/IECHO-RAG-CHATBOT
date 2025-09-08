@@ -157,10 +157,72 @@ export class AgentEksFargateStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // VPC
+    // VPC with VPC Endpoints (no NAT Gateway)
     const vpc = new ec2.Vpc(this, "AgentVpc", {
       maxAzs: 2,
-      natGateways: 1,
+      natGateways: 0,
+      subnetConfiguration: [
+        {
+          cidrMask: 24,
+          name: 'Public',
+          subnetType: ec2.SubnetType.PUBLIC,
+        },
+        {
+          cidrMask: 24,
+          name: 'Private',
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+        }
+      ]
+    });
+
+    // Security Group for VPC Endpoints
+    const vpcEndpointSg = new ec2.SecurityGroup(this, "VpcEndpointSg", {
+      vpc,
+      description: "Security group for VPC endpoints",
+      allowAllOutbound: false
+    });
+
+    vpcEndpointSg.addIngressRule(
+      ec2.Peer.ipv4(vpc.vpcCidrBlock),
+      ec2.Port.tcp(443),
+      "Allow HTTPS from VPC"
+    );
+
+    // Gateway Endpoints (no cost)
+    vpc.addGatewayEndpoint("S3Endpoint", {
+      service: ec2.GatewayVpcEndpointAwsService.S3,
+      subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }]
+    });
+
+    vpc.addGatewayEndpoint("DynamoDbEndpoint", {
+      service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
+      subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }]
+    });
+
+    // Interface Endpoints
+    const interfaceEndpoints = [
+      { name: "EcrApi", service: ec2.InterfaceVpcEndpointAwsService.ECR },
+      { name: "EcrDkr", service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER },
+      { name: "CloudWatchLogs", service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS },
+      { name: "Eks", service: ec2.InterfaceVpcEndpointAwsService.EKS },
+      { name: "Sts", service: ec2.InterfaceVpcEndpointAwsService.STS },
+    ];
+
+    interfaceEndpoints.forEach(endpoint => {
+      vpc.addInterfaceEndpoint(endpoint.name, {
+        service: endpoint.service,
+        securityGroups: [vpcEndpointSg],
+        subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+        privateDnsEnabled: true
+      });
+    });
+
+    // Bedrock endpoint
+    vpc.addInterfaceEndpoint("Bedrock", {
+      service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.bedrock-runtime`),
+      securityGroups: [vpcEndpointSg],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      privateDnsEnabled: true
     });
 
     // Cluster master role
@@ -176,7 +238,7 @@ export class AgentEksFargateStack extends Stack {
       mastersRole: masterRole,
       outputClusterName: true,
       endpointAccess: eks.EndpointAccess.PUBLIC_AND_PRIVATE,
-      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
+      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
       kubectlLayer: new KubectlV32Layer(this, "kubectl"),
       clusterLogging: [
         eks.ClusterLoggingTypes.API,
@@ -267,7 +329,7 @@ export class AgentEksFargateStack extends Stack {
     // Fargate profile with logging
     const fargateProfile = cluster.addFargateProfile("AgentProfile", {
       selectors: [{ namespace: k8sAppNameSpace, labels: { app: "agent-service" } }],
-      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       fargateProfileName: "agent-profile",
     });
 
