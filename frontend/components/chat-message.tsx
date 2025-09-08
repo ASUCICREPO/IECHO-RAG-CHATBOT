@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { config } from "@/lib/config"
+import CitationList from "@/components/citation-list"
 import { 
   ChevronDown, 
   Lightbulb,
@@ -35,63 +35,6 @@ interface ChatMessageProps {
   onRate: () => void;
   onFollowUpClick?: (question: string) => void;
   onRetry?: (messageId: string) => void;
-}
-
-function CitationList({ citations }: { citations: Citation[] }) {
-  const [expanded, setExpanded] = useState(false);
-
-  if (!citations?.length) return null;
-
-  return (
-    <div className="mt-2 text-sm">
-      <button 
-        onClick={() => setExpanded(!expanded)}
-        className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-xs"
-      >
-        {expanded ? 'Hide sources' : `Show sources (${citations.length})`}
-        <ChevronDown className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-      </button>
-      
-      {expanded && (
-        <div className="mt-2 space-y-1.5">
-          {citations.map((cite, i) => (
-            <div key={i} className="p-2 bg-gray-50 border border-gray-200 rounded text-xs">
-              {cite.source.startsWith('s3://') ? (
-                <button 
-                  onClick={async () => {
-                    try {
-                      const encodedPath = encodeURIComponent(cite.source);
-                      const response = await fetch(`${config.apiUrl}/document-url/${encodedPath}`);
-                      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                      const data = await response.json();
-                      if (data.url) {
-                        window.open(data.url, '_blank');
-                      } else {
-                        alert('Document URL not available');
-                      }
-                    } catch (error) {
-                      console.error('Failed to get document URL:', error);
-                      const errorMsg = error instanceof Error && error.message.includes('Failed to fetch') 
-                        ? 'Network connection failed. Please check your internet and try again.'
-                        : 'Failed to open document. Please try again later.';
-                      alert(errorMsg);
-                    }
-                  }}
-                  className="text-left text-blue-700 hover:text-blue-900 hover:bg-blue-100 px-1 py-0.5 rounded transition-colors text-xs font-medium break-words"
-                >
-                  📄 {cite.source.split('/').pop()?.replace('.pdf', '') || cite.source}
-                </button>
-              ) : (
-                <span className="text-gray-600 text-xs break-words">
-                  📄 {cite.source}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 export default function ChatMessage({ message, onRate, onFollowUpClick, onRetry }: ChatMessageProps) {
@@ -179,9 +122,7 @@ export default function ChatMessage({ message, onRate, onFollowUpClick, onRetry 
             </div>
             
             {message.sender === 'ai' && message.citations && message.citations.length > 0 && (
-              <div className="mt-2">
-                <CitationList citations={message.citations} />
-              </div>
+              <CitationList citations={message.citations} />
             )}
             
             {message.sender === 'ai' && !message.error && (
