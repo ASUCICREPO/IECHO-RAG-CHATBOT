@@ -1,4 +1,4 @@
-import { Stack, StackProps, Duration, RemovalPolicy, CfnJson } from "aws-cdk-lib";
+import { Stack, StackProps, Duration, RemovalPolicy, CfnJson, SecretValue } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as eks from "aws-cdk-lib/aws-eks";
@@ -7,12 +7,151 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
+import * as amplify from "aws-cdk-lib/aws-amplify";
+
+
+
 import * as path from "path";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as s3n from "aws-cdk-lib/aws-s3-notifications";
 import { KubectlV32Layer } from "@aws-cdk/lambda-layer-kubectl-v32";
-import { KubernetesPatch } from "aws-cdk-lib/aws-eks"; // CHANGE: add patch construct
+import { KubernetesPatch } from "aws-cdk-lib/aws-eks";
+
+import * as cdk8s from "cdk8s";
+
+interface AgentAppChartProps {
+  iamRoleArn: string;
+  namespace: string;
+  serviceAccountName: string;
+  imageUri: string;
+  knowledgeBaseId: string;
+  region: string;
+  accountId: string;
+  logGroupName: string;
+  feedbackTableName: string;
+
+}
+
+class AgentAppChart extends cdk8s.Chart {
+  constructor(scope: cdk8s.App, id: string, props: AgentAppChartProps) {
+    super(scope, id, { namespace: props.namespace });
+
+    // Service Account
+    new cdk8s.ApiObject(this, "service-account", {
+      apiVersion: "v1",
+      kind: "ServiceAccount",
+      metadata: {
+        name: props.serviceAccountName,
+        namespace: props.namespace,
+        annotations: {
+          "eks.amazonaws.com/role-arn": props.iamRoleArn
+        }
+      }
+    });
+
+    // Deployment
+    new cdk8s.ApiObject(this, "deployment", {
+      apiVersion: "apps/v1",
+      kind: "Deployment",
+      metadata: {
+        name: "agent-service",
+        namespace: props.namespace,
+        labels: { app: "agent-service" }
+      },
+      spec: {
+        replicas: 2,
+        selector: { matchLabels: { app: "agent-service" } },
+        template: {
+          metadata: { labels: { app: "agent-service" } },
+          spec: {
+            serviceAccountName: props.serviceAccountName,
+            containers: [{
+              name: "agent-container",
+              image: props.imageUri,
+              ports: [{ containerPort: 8000 }],
+              env: [
+                { name: "KNOWLEDGE_BASE_ID", value: props.knowledgeBaseId },
+                { name: "AWS_REGION", value: props.region },
+                { name: "AWS_ACCOUNT_ID", value: props.accountId },
+                { name: "LOG_GROUP", value: props.logGroupName },
+                { name: "FEEDBACK_TABLE_NAME", value: props.feedbackTableName },
+
+              ],
+              resources: {
+                requests: { memory: "512Mi", cpu: "500m" },
+                limits: { memory: "1Gi", cpu: "1000m" }
+              },
+              livenessProbe: {
+                httpGet: { path: "/health", port: 8000 },
+                initialDelaySeconds: 30,
+                periodSeconds: 10
+              },
+              readinessProbe: {
+                httpGet: { path: "/health", port: 8000 },
+                initialDelaySeconds: 5,
+                periodSeconds: 5
+              }
+            }]
+          }
+        }
+      }
+    });
+
+    // Service
+    new cdk8s.ApiObject(this, "service", {
+      apiVersion: "v1",
+      kind: "Service",
+      metadata: {
+        name: "agent-service",
+        namespace: props.namespace,
+        labels: { app: "agent-service" }
+      },
+      spec: {
+        type: "ClusterIP",
+        ports: [{ port: 80, targetPort: 8000 }],
+        selector: { app: "agent-service" }
+      }
+    });
+
+
+
+    // Ingress
+    new cdk8s.ApiObject(this, "ingress", {
+      apiVersion: "networking.k8s.io/v1",
+      kind: "Ingress",
+      metadata: {
+        name: "agent-ingress",
+        namespace: props.namespace,
+        annotations: {
+          "alb.ingress.kubernetes.io/scheme": "internet-facing",
+          "alb.ingress.kubernetes.io/target-type": "ip",
+          "alb.ingress.kubernetes.io/healthcheck-path": "/health",
+          "alb.ingress.kubernetes.io/load-balancer-attributes": "deletion_protection.enabled=false,idle_timeout.timeout_seconds=300",
+          "alb.ingress.kubernetes.io/target-group-attributes": "deregistration_delay.timeout_seconds=30",
+          "kubernetes.io/ingress.class": "alb"
+        }
+      },
+      spec: {
+        ingressClassName: "alb",
+        rules: [{
+          http: {
+            paths: [{
+              path: "/",
+              pathType: "Prefix",
+              backend: {
+                service: {
+                  name: "agent-service",
+                  port: { number: 80 }
+                }
+              }
+            }]
+          }
+        }]
+      }
+    });
+  }
+}
 
 export class AgentEksFargateStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -22,6 +161,51 @@ export class AgentEksFargateStack extends Stack {
     const vpc = new ec2.Vpc(this, "AgentVpc", {
       maxAzs: 2,
       natGateways: 1,
+    });
+
+    // VPC Endpoints for AWS services (cost optimization + security)
+    vpc.addGatewayEndpoint("S3Endpoint", {
+      service: ec2.GatewayVpcEndpointAwsService.S3,
+    });
+
+    vpc.addGatewayEndpoint("DynamoDbEndpoint", {
+      service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
+    });
+
+    vpc.addInterfaceEndpoint("EcrApi", {
+      service: ec2.InterfaceVpcEndpointAwsService.ECR,
+    });
+
+    vpc.addInterfaceEndpoint("EcrDkr", {
+      service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER,
+    });
+
+    vpc.addInterfaceEndpoint("CloudWatchLogs", {
+      service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
+    });
+
+    vpc.addInterfaceEndpoint("Bedrock", {
+      service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.bedrock-runtime`),
+    });
+
+    vpc.addInterfaceEndpoint("BedrockAgent", {
+      service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.bedrock-agent`),
+    });
+
+    vpc.addInterfaceEndpoint("Sts", {
+      service: ec2.InterfaceVpcEndpointAwsService.STS,
+    });
+
+    vpc.addInterfaceEndpoint("Eks", {
+      service: ec2.InterfaceVpcEndpointAwsService.EKS,
+    });
+
+    vpc.addInterfaceEndpoint("Ec2", {
+      service: ec2.InterfaceVpcEndpointAwsService.EC2,
+    });
+
+    vpc.addInterfaceEndpoint("Lambda", {
+      service: ec2.InterfaceVpcEndpointAwsService.LAMBDA,
     });
 
     // Cluster master role
@@ -39,6 +223,13 @@ export class AgentEksFargateStack extends Stack {
       endpointAccess: eks.EndpointAccess.PUBLIC_AND_PRIVATE,
       vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
       kubectlLayer: new KubectlV32Layer(this, "kubectl"),
+      clusterLogging: [
+        eks.ClusterLoggingTypes.API,
+        eks.ClusterLoggingTypes.AUDIT,
+        eks.ClusterLoggingTypes.AUTHENTICATOR,
+        eks.ClusterLoggingTypes.CONTROLLER_MANAGER,
+        eks.ClusterLoggingTypes.SCHEDULER,
+      ],
     });
 
 
@@ -67,7 +258,7 @@ export class AgentEksFargateStack extends Stack {
     // Logs
     const logGroup = new logs.LogGroup(this, "AgentLogGroup", {
       logGroupName: `/aws/eks/${cluster.clusterName}/agent-service`,
-      retention: logs.RetentionDays.ONE_WEEK,
+      retention: logs.RetentionDays.INFINITE,
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
@@ -80,6 +271,8 @@ export class AgentEksFargateStack extends Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
     });
 
+
+
     // IAM perms
     iamRoleForK8sSa.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: [
@@ -88,6 +281,7 @@ export class AgentEksFargateStack extends Stack {
         "bedrock:RetrieveAndGenerate",
         "bedrock:Retrieve",
         "bedrock:GetInferenceProfile",
+
         "bedrock-agent-runtime:Retrieve",
         "bedrock-agent-runtime:RetrieveAndGenerate",
       ],
@@ -98,34 +292,115 @@ export class AgentEksFargateStack extends Stack {
       resources: ["*"],
     }));
     iamRoleForK8sSa.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
-      resources: [logGroup.logGroupArn + ":*"],
+      actions: [
+        "logs:CreateLogStream", 
+        "logs:PutLogEvents", 
+        "logs:DescribeLogGroups", 
+        "logs:DescribeLogStreams",
+        "logs:CreateLogGroup"
+      ],
+      resources: [
+        logGroup.logGroupArn + ":*",
+        `arn:aws:logs:${this.region}:${this.account}:log-group:/aws/eks/${cluster.clusterName}/fargate:*`
+      ],
     }));
     iamRoleForK8sSa.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan"],
       resources: [feedbackTable.tableArn],
     }));
 
-    // Fargate profile
+    // Fargate profile with logging
     const fargateProfile = cluster.addFargateProfile("AgentProfile", {
       selectors: [{ namespace: k8sAppNameSpace, labels: { app: "agent-service" } }],
       subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      fargateProfileName: "agent-profile",
     });
+
+    // Fargate logging configuration
+    const fargateLoggingConfigMap = {
+      apiVersion: "v1",
+      kind: "ConfigMap",
+      metadata: {
+        name: "aws-logging",
+        namespace: "aws-observability",
+      },
+      data: {
+        "flb_log_cw": "true",
+        "filters.conf": `[FILTER]
+    Name parser
+    Match *
+    Key_name log
+    Parser cri
+    Reserve_Data On
+    Preserve_Key On
+
+[FILTER]
+    Name kubernetes
+    Match kube.*
+    Merge_Log On
+    Keep_Log Off
+    K8S-Logging.Parser On
+    K8S-Logging.Exclude On`,
+        "output.conf": `[OUTPUT]
+    Name cloudwatch_logs
+    Match *
+    region ${this.region}
+    log_group_name /aws/eks/${cluster.clusterName}/fargate
+    log_stream_prefix fargate-
+    auto_create_group On`,
+        "parsers.conf": `[PARSER]
+    Name cri
+    Format regex
+    Regex ^(?<time>[^ ]+) (?<stream>stdout|stderr) (?<logtag>[^ ]*) (?<log>.*)$
+    Time_Key time
+    Time_Format %Y-%m-%dT%H:%M:%S.%L%z`,
+      },
+    };
+
+    // Create aws-observability namespace
+    const observabilityNamespace = {
+      apiVersion: "v1",
+      kind: "Namespace",
+      metadata: { name: "aws-observability" },
+    };
+
+    const observabilityNsManifest = cluster.addManifest("ObservabilityNamespace", observabilityNamespace);
+    const fargateLoggingManifest = cluster.addManifest("FargateLoggingConfig", fargateLoggingConfigMap);
+    
+    // Ensure namespace is created before ConfigMap
+    fargateLoggingManifest.node.addDependency(observabilityNsManifest);
 
     // KB id
     const knowledgeBaseId = this.node.tryGetContext("knowledgeBaseId") || "PLACEHOLDER";
     
+
+
     // Optional: Office-to-PDF processor
     const documentsBucketName = this.node.tryGetContext("documentsBucketName");
     if (documentsBucketName) {
       const documentsBucket = s3.Bucket.fromBucketName(this, "DocumentsBucket", documentsBucketName);
       
+      const lambdaLogGroup = new logs.LogGroup(this, "LambdaLogGroup", {
+        logGroupName: `/aws/lambda/office-to-pdf-${this.stackName}`,
+        retention: logs.RetentionDays.TWO_WEEKS,
+        removalPolicy: RemovalPolicy.DESTROY
+      });
+      
       const officeToPdfLambda = new lambda.Function(this, "OfficeToPdfFunction", {
         runtime: lambda.Runtime.NODEJS_18_X,
         handler: "index.s3Handler",
-        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda/office-to-pdf")),
+        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda/office-to-pdf"), {
+          bundling: {
+            image: lambda.Runtime.NODEJS_18_X.bundlingImage,
+            command: [
+              'bash', '-c',
+              'npm install && cp -r . /asset-output'
+            ],
+          },
+        }),
         timeout: Duration.minutes(15),
         memorySize: 1536,
+        logGroup: lambdaLogGroup,
         layers: [
           lambda.LayerVersion.fromLayerVersionArn(
             this,
@@ -200,6 +475,8 @@ export class AgentEksFargateStack extends Stack {
       resources: ["*"],
     }));
 
+
+
     // ALB Controller Helm chart
     const albChart = cluster.addHelmChart("AWSLoadBalancerController", {
       chart: "aws-load-balancer-controller",
@@ -222,123 +499,44 @@ export class AgentEksFargateStack extends Stack {
     });
     albChart.node.addDependency(albServiceAccount);
 
-    // K8s manifests (SA, Deployment, Service, Ingress)
-    const serviceAccountManifest = {
-      apiVersion: "v1",
-      kind: "ServiceAccount",
-      metadata: {
-        name: k8sAppServiceAccount,
-        namespace: k8sAppNameSpace,
-        annotations: { "eks.amazonaws.com/role-arn": iamRoleForK8sSa.roleArn },
-      },
-    };
 
-    const deployment = {
-      apiVersion: "apps/v1",
-      kind: "Deployment",
-      metadata: { name: "agent-service", namespace: k8sAppNameSpace, labels: { app: "agent-service" } },
-      spec: {
-        replicas: 2,
-        selector: { matchLabels: { app: "agent-service" } },
-        template: {
-          metadata: { labels: { app: "agent-service" } },
-          spec: {
-            serviceAccountName: k8sAppServiceAccount,
-            containers: [{
-              name: "agent-container",
-              image: dockerAsset.imageUri,
-              ports: [{ containerPort: 8000 }],
-              env: [
-                { name: "KNOWLEDGE_BASE_ID", value: knowledgeBaseId },
-                { name: "AWS_REGION", value: this.region },
-                { name: "AWS_ACCOUNT_ID", value: this.account },
-                { name: "LOG_GROUP", value: logGroup.logGroupName },
-                { name: "FEEDBACK_TABLE_NAME", value: feedbackTable.tableName },
-              ],
-              resources: {
-                requests: { memory: "512Mi", cpu: "500m" },
-                limits: { memory: "1Gi", cpu: "1000m" },
-              },
-              livenessProbe: { httpGet: { path: "/health", port: 8000 }, initialDelaySeconds: 30, periodSeconds: 10 },
-              readinessProbe: { httpGet: { path: "/health", port: 8000 }, initialDelaySeconds: 5, periodSeconds: 5 },
-            }],
-          },
-        },
-      },
-    };
 
-    const service = {
-      apiVersion: "v1",
-      kind: "Service",
-      metadata: { name: "agent-service", namespace: k8sAppNameSpace, labels: { app: "agent-service" } },
-      spec: { type: "ClusterIP", ports: [{ port: 80, targetPort: 8000 }], selector: { app: "agent-service" } },
-    };
+    // Use cdk8s for proper Kubernetes resource management
+    const cdk8sApp = new cdk8s.App();
+    const agentAppChart = new AgentAppChart(cdk8sApp, "agent-app", {
+      iamRoleArn: iamRoleForK8sSa.roleArn,
+      namespace: k8sAppNameSpace,
+      serviceAccountName: k8sAppServiceAccount,
+      imageUri: dockerAsset.imageUri,
+      knowledgeBaseId,
+      region: this.region,
+      accountId: this.account,
+      logGroupName: logGroup.logGroupName,
+      feedbackTableName: feedbackTable.tableName,
 
-    const ingress = {
-      apiVersion: "networking.k8s.io/v1",
-      kind: "Ingress",
-      metadata: {
-        name: "agent-ingress",
-        namespace: k8sAppNameSpace,
-        annotations: {
-          "alb.ingress.kubernetes.io/scheme": "internet-facing",
-          "alb.ingress.kubernetes.io/target-type": "ip",
-          "alb.ingress.kubernetes.io/healthcheck-path": "/health",
-          "alb.ingress.kubernetes.io/load-balancer-attributes":
-            "deletion_protection.enabled=false,idle_timeout.timeout_seconds=300",
-          "alb.ingress.kubernetes.io/target-group-attributes":
-            "deregistration_delay.timeout_seconds=30", // CHANGE: faster TG drain on delete
-          "alb.ingress.kubernetes.io/tags": "Environment=dev,ManagedBy=CDK",
-          "kubernetes.io/ingress.class": "alb",
-          // CHANGE: removed manual finalizer annotation
-        },
-      },
-      spec: {
-        ingressClassName: "alb",
-        rules: [{
-          http: {
-            paths: [{
-              path: "/",
-              pathType: "Prefix",
-              backend: { service: { name: "agent-service", port: { number: 80 } } },
-            }],
-          },
-        }],
-      },
-    };
 
-    const saManifest = cluster.addManifest("AgentServiceAccount", serviceAccountManifest);
-    const deployManifest = cluster.addManifest("AgentDeployment", deployment);
-    const svcManifest = cluster.addManifest("AgentService", service);
-    const ingressManifest = cluster.addManifest("AgentIngress", ingress);
+    });
+    
+    const agentChart = cluster.addCdk8sChart("agent-app-chart", agentAppChart);
 
-    // Create-order (controller first), delete-order reversed (Ingress deleted while controller is alive)
-    saManifest.node.addDependency(fargateProfile);
-    deployManifest.node.addDependency(saManifest);
-    deployManifest.node.addDependency(albChart);
-    svcManifest.node.addDependency(deployManifest);
-    svcManifest.node.addDependency(albChart);
-    ingressManifest.node.addDependency(svcManifest);
-    ingressManifest.node.addDependency(albChart);
-
-    // CHANGE: ensure aws-auth is created before (and deleted last)
-    saManifest.node.addDependency(cluster.awsAuth);
-    deployManifest.node.addDependency(cluster.awsAuth);
-    svcManifest.node.addDependency(cluster.awsAuth);
-    ingressManifest.node.addDependency(cluster.awsAuth);
+    // cdk8s chart dependencies
+    agentChart.node.addDependency(fargateProfile);
+    agentChart.node.addDependency(albChart);
     albChart.node.addDependency(cluster.awsAuth);
 
-    // CHANGE: delete-time safety net — strip any lingering finalizers
+    // No finalizer patch needed - proper dependency ordering handles cleanup
+
+    // Ingress finalizer patch for safer cleanup
     const ingressFinalizerPatch = new KubernetesPatch(this, "IngressFinalizerPatch", {
       cluster,
       resourceName: "ingress/agent-ingress",
       resourceNamespace: k8sAppNameSpace,
-      applyPatch: { metadata: { annotations: { "cdk.aws/finalizer-patch": "applied" } } }, // no-op at create/update
-      restorePatch: { metadata: { finalizers: [] } }, // executed at DELETE time
+      applyPatch: { metadata: { annotations: { "cdk.aws/finalizer-patch": "applied" } } },
+      restorePatch: { metadata: { finalizers: [] } },
     });
-    ingressFinalizerPatch.node.addDependency(ingressManifest);
+    ingressFinalizerPatch.node.addDependency(agentChart);
 
-    // Expose ALB hostname
+    // Get ALB hostname
     const albDnsProvider = new eks.KubernetesObjectValue(this, "AlbDnsProvider", {
       cluster,
       objectType: "ingress",
@@ -346,7 +544,7 @@ export class AgentEksFargateStack extends Stack {
       objectNamespace: k8sAppNameSpace,
       jsonPath: ".status.loadBalancer.ingress[0].hostname",
     });
-    albDnsProvider.node.addDependency(ingressManifest);
+    albDnsProvider.node.addDependency(agentChart);
 
     // API Gateway → ALB
     const api = new apigateway.RestApi(this, "AgentApi", {
@@ -370,13 +568,58 @@ export class AgentEksFargateStack extends Stack {
     const rootIntegration = new apigateway.HttpIntegration(`http://${albDnsProvider.value}`, { httpMethod: "ANY" });
     api.root.addMethod("ANY", rootIntegration);
     
-    // Ensure API Gateway waits for ALB DNS
     api.node.addDependency(albDnsProvider);
+
+    // Amplify App with GitHub App integration
+    const amplifyApp = new amplify.CfnApp(this, "iECHOAmplifyApp", {
+      name: "iECHO-RAG-Chatbot",
+      description: "iECHO RAG Chatbot Frontend",
+      repository: `https://github.com/${this.node.tryGetContext("githubOwner") || "ASUCICREPO"}/${this.node.tryGetContext("githubRepo") || "IECHO-RAG-CHATBOT"}`,
+      accessToken: SecretValue.secretsManager("github-access-token").unsafeUnwrap(),
+      platform: "WEB",
+      buildSpec: `version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - cd frontend
+        - npm ci
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    baseDirectory: frontend/out
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - frontend/node_modules/**/*
+      - frontend/.next/cache/**/*`,
+      environmentVariables: [
+        {
+          name: "NEXT_PUBLIC_API_BASE_URL",
+          value: api.url
+        }
+      ]
+    });
+
+    // Create branch for auto-build
+    const fullCdkBranch = new amplify.CfnBranch(this, "FullCdkBranch", {
+      appId: amplifyApp.attrAppId,
+      branchName: "full-cdk",
+      enableAutoBuild: true,
+      stage: "PRODUCTION"
+    });
+
+    // Note: Repository connection via GitHub App must be done manually in Amplify console
 
     // Outputs
     this.exportValue(api.url, { name: "ApiGatewayUrl", description: "The API Gateway URL" });
-    this.exportValue(albDnsProvider.value, { name: "AlbDnsName", description: "The ALB DNS name" });
     this.exportValue(cluster.clusterName, { name: "AgentClusterName", description: "The name of the EKS cluster" });
     this.exportValue(cluster.clusterEndpoint, { name: "AgentClusterEndpoint", description: "The endpoint of the EKS cluster" });
+    this.exportValue(masterRole.roleArn, { name: "ClusterMasterRoleArn", description: "The master role ARN for kubectl access" });
+    this.exportValue(albDnsProvider.value, { name: "AlbDnsName", description: "The ALB DNS name" });
+    this.exportValue(amplifyApp.attrDefaultDomain, { name: "AmplifyAppUrl", description: "The Amplify app URL" });
+    this.exportValue(amplifyApp.attrAppId, { name: "AmplifyAppId", description: "The Amplify app ID" });
   }
 }

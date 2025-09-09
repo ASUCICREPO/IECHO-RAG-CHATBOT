@@ -7,6 +7,7 @@
     "cdk-app": "bin/cdk-app.js"
   },
   "scripts": {
+    "build": "tsc",
     "format": "prettier --write .",
     "watch": "tsc -w",
     "test": "vitest run",
@@ -24,6 +25,8 @@
     "@aws-cdk/lambda-layer-kubectl-v32": "^2.1.0",
     "@aws-cdk/lambda-layer-kubectl-v33": "^2.0.0",
     "aws-cdk-lib": "2.192.0",
+    "cdk8s": "^2.70.11",
+    "cdk8s-plus-27": "^2.9.5",
     "constructs": "^10.2.0"
   },
   "prettier": {

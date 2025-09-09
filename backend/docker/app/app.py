@@ -2,7 +2,7 @@
 # 
 # ARCHITECTURE OVERVIEW:
 # - Orchestrator Agent: Routes queries to specialized domain agents using natural language
-# - Specialist Agents: TB, Agriculture, and General health/education experts
+# - Specialist Agents: TB, Agriculture
 # - Knowledge Base Integration: AWS Bedrock Knowledge Base with vector search
 # - Streaming Support: Real-time response streaming with reasoning suppression
 # - Session Management: In-memory conversation history with TTL cleanup
@@ -34,6 +34,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 from strands import Agent, tool
+
 try:
     from strands_tools import image_reader
 except ImportError:
@@ -73,8 +74,9 @@ logging.basicConfig(level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def log_to_cloudwatch(message: str, level: str = "INFO"):
+def log_to_cloudwatch(message: str, level: str = "INFO", error_details: Optional[Dict] = None):
     if not os.environ.get('LOG_GROUP'):
+        print(f"[{level}] {message}")
         return
     try:
         cloudwatch_logs = boto3.client('logs', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
@@ -86,18 +88,21 @@ def log_to_cloudwatch(message: str, level: str = "INFO"):
             )
         except cloudwatch_logs.exceptions.ResourceAlreadyExistsException:
             pass
+        
+        log_message = f"[{level}] {message}"
+        if error_details:
+            log_message += f" | Error Details: {json.dumps(error_details)}"
+            
         cloudwatch_logs.put_log_events(
             logGroupName=os.environ.get('LOG_GROUP'),
             logStreamName=stream_name,
             logEvents=[{
                 'timestamp': int(datetime.now(timezone.utc).timestamp() * 1000),
-                'message': f"[{level}] {message}"
+                'message': log_message
             }]
         )
     except Exception as e:
-        print(f"CloudWatch logging failed: {e}")
-
-print(f"Application starting with LOG_GROUP: {os.environ.get('LOG_GROUP')}")
+        print(f"CloudWatch logging failed: {e} | Original message: [{level}] {message}")
 
 # -----------------------------------------------------------------------------
 # AWS clients & env
@@ -109,6 +114,10 @@ s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-west-2'))
 KNOWLEDGE_BASE_ID = os.environ.get('KNOWLEDGE_BASE_ID', '')
 FEEDBACK_TABLE_NAME = os.environ.get('FEEDBACK_TABLE_NAME', 'iecho-feedback-table')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
+
+print(f"Application starting with LOG_GROUP: {os.environ.get('LOG_GROUP')}")
+log_to_cloudwatch(f"Application started - LOG_GROUP: {os.environ.get('LOG_GROUP')}, KB_ID: {KNOWLEDGE_BASE_ID}, Region: {os.environ.get('AWS_REGION', 'us-west-2')}")
+
 
 # -----------------------------------------------------------------------------
 # In-memory session store (TTL managed)
@@ -153,23 +162,34 @@ Analysis tools (use first if needed):
 - image_reader: Analyze images to understand visual content
 
 Specialist tools (choose one for final response):
-- tb_specialist: Handles tuberculosis-related questions
-- agriculture_specialist: Handles agriculture/farming topics  
-- general_specialist: Handles health/education topics that relate to TB or agriculture
+- tb_specialist: Handles ALL tuberculosis and health-related questions
+- agriculture_specialist: Handles ALL agriculture and farming topics
 - reject_handler: Politely declines unrelated queries
 
-CRITICAL RULES:
-- If query contains "Image path:", use image_reader FIRST, then route to appropriate specialist
-- Always end with exactly one specialist tool call for the final response
-- NEVER show tool calls, reasoning, or internal processes to the user
-- Only return the clean, helpful response from the specialist
-- Route TB-related questions to tb_specialist
-- Route agriculture-related questions to agriculture_specialist
-- Route ambiguous questions that may connect to TB or agriculture contexts to general_specialist
-- Use reject_handler ONLY when the query has no meaningful connection to TB, agriculture, or related health/education contexts
+CRITICAL GUARDRAILS:
+1. IMAGE ANALYSIS RULES:
+   - If query contains "Image path:", use image_reader FIRST to analyze the image
+   - After image analysis, evaluate BOTH the original text query AND image content together
+   - If image shows unrelated content (pets, random objects, people, landscapes, etc.) AND text query is generic ("what is in the image?", "describe this", "what do you see?"), use reject_handler
+   - Only proceed to specialists if image content OR text query relates to TB/agriculture/health
+
+2. TEXT QUERY VALIDATION:
+   - Reject queries asking for: personal advice, entertainment, general knowledge unrelated to TB/agriculture
+   - Reject requests for: creative writing, jokes, games, programming help, financial advice
+   - Reject inappropriate content: offensive language, harmful instructions, illegal activities
+
+3. ROUTING LOGIC:
+   - TB/Health-related: symptoms, diagnosis, treatment, prevention, patient care, nutrition, public health → tb_specialist
+   - Agriculture-related: crops, farming, irrigation, soil, food safety, livestock → agriculture_specialist
+   - Everything else → reject_handler
+
+4. OUTPUT RULES:
+   - Always end with exactly one specialist tool call for the final response
+   - NEVER show tool calls, reasoning, or internal processes to the user
+   - Only return the clean, helpful response from the specialist
 """
 
-TB_AGENT_PROMPT = """You are a TB specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
+TB_AGENT_PROMPT = """You are a TB and Health specialist. ALWAYS use the kb_search tool to find information, then provide brief, direct answers about:
 - TB diagnosis & symptoms; lab tests (smear, GeneXpert), imaging
 - Treatment protocols & medications (e.g., HRZE, MDR/XDR management)
 - Infection control & prevention strategies
@@ -208,7 +228,7 @@ def filter_thinking_tags(text: str) -> str:
     text = re.sub(r'</?thinking[^>]*>', '', text)
     text = re.sub(r'Action: [^\n]*\n?', '', text)
     # Remove decision tokens and any following newlines
-    text = re.sub(r'^\s*<(TB|AG|GN|REJECT)>\s*\n*', '', text)
+    text = re.sub(r'^\s*<(TB|AG|REJECT)>\s*\n*', '', text)
     return text.strip()
 
 
@@ -223,16 +243,20 @@ def query_knowledge_base(query: str, topic: str, conversation_history: List[str]
                 context_query = f"Previous question: {recent_user[-1]}\nCurrent question: {query}"
             else:
                 context_query = f"Context: {' '.join(conversation_history[-2:])}\n\nCurrent question: {query}"
-        resp = bedrock_agent_runtime.retrieve_and_generate(
-            input={'text': context_query},
-            retrieveAndGenerateConfiguration={
+        request_config = {
+            'input': {'text': context_query},
+            'retrieveAndGenerateConfiguration': {
                 'type': 'KNOWLEDGE_BASE',
                 'knowledgeBaseConfiguration': {
                     'knowledgeBaseId': KNOWLEDGE_BASE_ID,
                     'modelArn': f'arn:aws:bedrock:{os.environ.get("AWS_REGION", "us-west-2")}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0'
                 }
             }
-        )
+        }
+        
+
+        
+        resp = bedrock_agent_runtime.retrieve_and_generate(**request_config)
         return resp
     except Exception as e:
         logger.error(f"KB query error: {e}")
@@ -244,7 +268,7 @@ class ToolChoiceTracker:
         self.name: Optional[str] = None
     def set(self, name: Optional[str]):
         # Only track specialist tools, not analysis tools
-        if name and name in ['tb_specialist', 'agriculture_specialist', 'general_specialist', 'reject_handler']:
+        if name and name in ['tb_specialist', 'agriculture_specialist', 'reject_handler']:
             self.name = name
 
 def make_streaming_callback(on_tool_start: Optional[Callable[[str], None]] = None):
@@ -295,10 +319,9 @@ def make_kb_tool(topic: str, citations_sink: list, conversation_history: List[st
     return kb_search
 
 def build_specialists(conversation_history: List[str]):
-    """Create 3 specialist Agents, each with its own KB tool & citations sink."""
+    """Create 2 specialist Agents, each with its own KB tool & citations sink."""
     tb_citations: List[Dict] = []
     agri_citations: List[Dict] = []
-    gen_citations: List[Dict] = []
 
     # In-memory conversation manager - prioritize SlidingWindow for medical/agricultural precision
     if SlidingWindowConversationManager is not None:
@@ -311,33 +334,24 @@ def build_specialists(conversation_history: List[str]):
     # Build tools list (no image_reader at specialist level)
     tb_tools = [make_kb_tool("tuberculosis", tb_citations, conversation_history)]
     agri_tools = [make_kb_tool("agriculture", agri_citations, conversation_history)]
-    gen_tools = [make_kb_tool("general", gen_citations, conversation_history)]
     
     tb_agent = Agent(
         system_prompt=TB_AGENT_PROMPT,
         tools=tb_tools,
-        model="us.amazon.nova-lite-v1:0",
+        model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
     )
 
     agri_agent = Agent(
         system_prompt=AGRICULTURE_AGENT_PROMPT,
         tools=agri_tools,
-        model="us.amazon.nova-lite-v1:0",
-        conversation_manager=conv_mgr,
-    )
-
-    general_agent = Agent(
-        system_prompt="You are a generalist for health/education topics related to TB or agriculture. ALWAYS use the kb_search tool to find information, then provide brief, direct answers. Keep responses concise (2–3 sentences). Do NOT reveal internal reasoning.",
-        tools=gen_tools,
-        model="us.amazon.nova-lite-v1:0",
+        model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
         conversation_manager=conv_mgr,
     )
 
     return {
         "tb": (tb_agent, tb_citations),
         "agri": (agri_agent, agri_citations),
-        "general": (general_agent, gen_citations),
     }
 
 def build_orchestrator_tools(conversation_history: List[str]):
@@ -377,11 +391,7 @@ def build_orchestrator_tools(conversation_history: List[str]):
         agent, _ = specialists["agri"]
         return await _run_agent_and_capture(agent, user_query)
 
-    @tool
-    async def general_specialist(user_query: str) -> str:
-        """Generalist agent for topics not covered by TB or Agriculture; concise, practical answers."""
-        agent, _ = specialists["general"]
-        return await _run_agent_and_capture(agent, user_query)
+
 
     @tool
     async def reject_handler(user_query: str) -> str:
@@ -392,7 +402,6 @@ def build_orchestrator_tools(conversation_history: List[str]):
         mapping = {
             "tb_specialist": specialists["tb"][1],
             "agriculture_specialist": specialists["agri"][1],
-            "general_specialist": specialists["general"][1],
         }
         return mapping.get(tool_name, [])
 
@@ -404,7 +413,7 @@ def build_orchestrator_tools(conversation_history: List[str]):
         orchestrator_tools.append(image_reader)
     
     # Add specialist tools
-    orchestrator_tools.extend([tb_specialist, agriculture_specialist, general_specialist, reject_handler])
+    orchestrator_tools.extend([tb_specialist, agriculture_specialist, reject_handler])
     
     return orchestrator_tools, get_last_citations, context
 
@@ -432,7 +441,7 @@ Format: Return only the questions, one per line, without numbers or bullets."""
 
         agent = Agent(
             system_prompt="You are a helpful assistant that generates relevant follow-up questions. Be concise and practical.",
-            model="us.amazon.nova-lite-v1:0"
+            model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0"
         )
 
         buf: List[str] = []
@@ -489,7 +498,6 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     if image:
         import tempfile
         import base64
-        import os
         # Detect image format from base64 data
         img_data = base64.b64decode(image)
         if img_data.startswith(b'\x89PNG'):
@@ -539,7 +547,7 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
     orchestrator = Agent(
         system_prompt=context_prompt,
         tools=tools,
-        model="us.amazon.nova-lite-v1:0",
+        model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
         conversation_manager=orch_mgr,
         callback_handler=cb
     )
@@ -562,27 +570,39 @@ async def run_orchestrator_agent(query: str, session_id: str, user_id: str, imag
         # Track tool usage
         if 'tool' in ev and ev.get('phase') in ('start', 'call', 'begin'):
             tracker.set(ev.get('tool'))
-        # Forward only visible data
+        # Forward data with proper typing for thinking vs content
         if "data" in ev:
             chunk = ev["data"]
             
-            # Check for thinking tag start/end
-            if '<thinking>' in chunk:
-                in_thinking = True
-            if '</thinking>' in chunk:
-                in_thinking = False
-                continue
-                
-            # Skip streaming if in thinking tags
-            if in_thinking or '<thinking>' in chunk or '</thinking>' in chunk:
-                continue
-            
-            # Skip empty chunks or chunks with only whitespace/newlines
+            # Skip empty chunks
             if not chunk.strip():
                 continue
+            
+            # Handle thinking tags that might be split across chunks
+            if chunk == '<thinking' or chunk.startswith('<thinking'):
+                in_thinking = True
+                yield json.dumps({"type": "thinking_start"}) + "\n"
+                continue
+            elif chunk == '>' and in_thinking and not full_text:
+                # This is likely the closing > of <thinking>
+                continue
+            elif '</' in chunk and in_thinking:
+                # Handle closing tag - extract content before </
+                before_tag = chunk.split('</')[0]
+                if before_tag:
+                    yield json.dumps({"type": "thinking", "data": before_tag}) + "\n"
+                in_thinking = False
+                yield json.dumps({"type": "thinking_end"}) + "\n"
+                continue
+            elif chunk in ['</thinking', 'thinking', '>', '>\n'] and not in_thinking:
+                # Skip remaining parts of closing tag
+                continue
                 
-            full_text += chunk
-            yield json.dumps({"type": "content", "data": chunk}) + "\n"
+            if in_thinking:
+                yield json.dumps({"type": "thinking", "data": chunk}) + "\n"
+            else:
+                full_text += chunk
+                yield json.dumps({"type": "content", "data": chunk}) + "\n"
 
     full_text = filter_thinking_tags(full_text)
 
@@ -637,7 +657,6 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
     if image:
         import tempfile
         import base64
-        import os
         # Detect image format from base64 data
         img_data = base64.b64decode(image)
         if img_data.startswith(b'\x89PNG'):
@@ -680,7 +699,7 @@ async def run_orchestrator_once(query: str, history: List[str], image: Optional[
     orchestrator = Agent(
         system_prompt=ORCHESTRATOR_PROMPT,
         tools=tools,
-        model="us.amazon.nova-lite-v1:0",
+        model=f"arn:aws:bedrock:{os.environ.get('AWS_REGION', 'us-west-2')}:{AWS_ACCOUNT_ID}:inference-profile/us.amazon.nova-lite-v1:0",
         conversation_manager=orch_mgr,
         callback_handler=cb
     )
@@ -774,6 +793,16 @@ async def chat(request: ChatRequest):
         }
 
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/chat',
+            'user_id': request.userId,
+            'session_id': request.sessionId,
+            'query_length': len(request.query) if request.query else 0,
+            'has_image': bool(request.image)
+        }
+        log_to_cloudwatch("Chat endpoint error", "ERROR", error_details)
         logger.error(f"Error in chat endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -797,6 +826,16 @@ async def chat_stream(request: ChatRequest):
         )
 
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/chat-stream',
+            'user_id': request.userId,
+            'session_id': request.sessionId,
+            'query_length': len(request.query) if request.query else 0,
+            'has_image': bool(request.image)
+        }
+        log_to_cloudwatch("Chat-stream endpoint error", "ERROR", error_details)
         logger.error(f"Error in chat-stream endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -826,6 +865,15 @@ async def submit_feedback(request: FeedbackRequest):
         return {"message": "Feedback submitted successfully", "feedbackId": item['feedbackId']}
 
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/feedback',
+            'user_id': request.userId,
+            'response_id': request.responseId,
+            'rating': request.rating
+        }
+        log_to_cloudwatch("Feedback endpoint error", "ERROR", error_details)
         logger.error(f"Error in feedback endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -861,6 +909,13 @@ async def list_documents():
         return {"documents": docs, "count": len(docs)}
 
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/documents',
+            'kb_id': KNOWLEDGE_BASE_ID
+        }
+        log_to_cloudwatch("Documents endpoint error", "ERROR", error_details)
         logger.error(f"Error in documents endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -875,6 +930,13 @@ async def get_document_url(path: str):
         url = s3.generate_presigned_url('get_object', Params={'Bucket': bucket, 'Key': key}, ExpiresIn=3600)
         return {"url": url}
     except Exception as e:
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'endpoint': '/document-url',
+            'path': path
+        }
+        log_to_cloudwatch("Document URL generation error", "ERROR", error_details)
         logger.error(f"Error generating presigned URL: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate document URL: {str(e)}")
 
@@ -886,6 +948,7 @@ async def get_status():
         "knowledgeBaseConfigured": bool(KNOWLEDGE_BASE_ID),
         "documentsConfigured": bool(KNOWLEDGE_BASE_ID),
         "feedbackConfigured": bool(FEEDBACK_TABLE_NAME),
+
         "region": os.environ.get('AWS_REGION', 'us-west-2'),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
@@ -893,3 +956,4 @@ async def get_status():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
     uvicorn.run(app, host='0.0.0.0', port=port)
+
