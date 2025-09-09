@@ -273,9 +273,9 @@ export class AgentEksFargateStack extends Stack {
       version: eks.KubernetesVersion.V1_32,
       mastersRole: masterRole,
       outputClusterName: true,
-      endpointAccess: eks.EndpointAccess.PUBLIC_AND_PRIVATE,
-      vpcSubnets: [{ subnetType: ec2.SubnetType.PUBLIC }],
+      endpointAccess: eks.EndpointAccess.PRIVATE,
       kubectlLayer: new KubectlV32Layer(this, "kubectl"),
+      placeClusterHandlerInVpc: true,
       clusterLogging: [
         eks.ClusterLoggingTypes.API,
         eks.ClusterLoggingTypes.AUDIT,
