@@ -54,7 +54,7 @@
   - Builds and deploys the CDK stack with context parameters (Knowledge Base ID, GitHub details, optional documents bucket)
   - Triggers Amplify frontend deployment automatically
 - **CodeBuild Integration**: The buildspec.yml defines the build process that installs Node.js 20, CDK CLI, compiles TypeScript, bootstraps CDK, and deploys infrastructure. It also supports destroy mode with automatic Kubernetes security group cleanup.
-- **GitHub Integration**: Amplify automatically builds and deploys the frontend when changes are pushed to the `full-cdk` branch.
+- **GitHub Integration**: Amplify automatically builds and deploys the frontend when changes are pushed to the `main` branch.
 - **Fargate Profile**: Configured for the `default` namespace with `app: agent-service` selector, running on private subnets with egress.
 - **Docker Image**: Application containerized with Python 3.12, FastAPI, and Strands framework, built and pushed to ECR during deployment.
 - **Knowledge Base Setup**: Requires manual creation of Bedrock Knowledge Base with S3 vector store configuration and data source synchronization before deployment.

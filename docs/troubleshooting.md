@@ -149,7 +149,7 @@ Amplify build failed with exit code 1
 
 **Solutions**:
 - Check GitHub repository access
-- Verify branch name is `full-cdk`
+- Verify branch name is `main`
 - Review Amplify build logs in AWS Console
 - Ensure package.json dependencies are correct
 

@@ -84,7 +84,7 @@ phases:
           if [ -n "$AMPLIFY_APP_ID" ] && [ "$AMPLIFY_APP_ID" != "None" ]; then
             echo "";
             echo "Triggering Amplify build...";
-            aws amplify start-job --app-id $AMPLIFY_APP_ID --branch-name full-cdk --job-type RELEASE >/dev/null 2>&1 && echo "✅ Amplify build started" || echo "🔄 Amplify build already running or failed";
+            aws amplify start-job --app-id $AMPLIFY_APP_ID --branch-name main --job-type RELEASE >/dev/null 2>&1 && echo "✅ Amplify build started" || echo "🔄 Amplify build already running or failed";
           fi;
           
           echo "";

@@ -168,11 +168,8 @@ Your AWS IAM user needs these specific permissions to run the deployment:
 
 ```bash
 # Clone the repository
-git clone <your-repository-url>
+git clone https://github.com/ASUCICREPO/IECHO-RAG-CHATBOT
 cd iECHO-RAG-CHATBOT
-
-# Navigate to backend
-cd backend
 ```
 
 ### Step 5: Deploy Infrastructure
