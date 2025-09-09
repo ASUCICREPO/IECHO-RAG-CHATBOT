@@ -206,11 +206,6 @@ export class AgentEksFargateStack extends Stack {
       service: ec2.InterfaceVpcEndpointAwsService.LAMBDA,
     });
 
-    // ECR Public endpoint for ALB Controller image
-    vpc.addInterfaceEndpoint("EcrPublic", {
-      service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.ecr.public`),
-    });
-
     // Cluster master role
     const masterRole = new iam.Role(this, "ClusterMasterRole", {
       assumedBy: new iam.AccountRootPrincipal(),
