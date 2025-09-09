@@ -30,7 +30,7 @@ interface AgentAppChartProps {
   accountId: string;
   logGroupName: string;
   feedbackTableName: string;
-
+  publicSubnetIds: string[];
 }
 
 class AgentAppChart extends cdk8s.Chart {
@@ -129,6 +129,7 @@ class AgentAppChart extends cdk8s.Chart {
           "alb.ingress.kubernetes.io/healthcheck-path": "/health",
           "alb.ingress.kubernetes.io/load-balancer-attributes": "deletion_protection.enabled=false,idle_timeout.timeout_seconds=300",
           "alb.ingress.kubernetes.io/target-group-attributes": "deregistration_delay.timeout_seconds=30",
+          "alb.ingress.kubernetes.io/subnets": props.publicSubnetIds.join(","),
           "kubernetes.io/ingress.class": "alb"
         }
       },
@@ -275,6 +276,7 @@ export class AgentEksFargateStack extends Stack {
       outputClusterName: true,
       endpointAccess: eks.EndpointAccess.PUBLIC_AND_PRIVATE,
       kubectlLayer: new KubectlV32Layer(this, "kubectl"),
+      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
       clusterLogging: [
         eks.ClusterLoggingTypes.API,
         eks.ClusterLoggingTypes.AUDIT,
@@ -364,6 +366,7 @@ export class AgentEksFargateStack extends Stack {
     // Fargate profile with logging
     const fargateProfile = cluster.addFargateProfile("AgentProfile", {
       selectors: [{ namespace: k8sAppNameSpace, labels: { app: "agent-service" } }],
+      vpc: vpc,
       subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       fargateProfileName: "agent-profile",
     });
@@ -565,7 +568,7 @@ export class AgentEksFargateStack extends Stack {
       accountId: this.account,
       logGroupName: logGroup.logGroupName,
       feedbackTableName: feedbackTable.tableName,
-
+      publicSubnetIds: vpc.publicSubnets.map(subnet => subnet.subnetId),
 
     });
     
