@@ -532,26 +532,52 @@ export class AgentEksFargateStack extends Stack {
 
 
 
-    // ALB Controller Helm chart
-    const albChart = cluster.addHelmChart("AWSLoadBalancerController", {
-      chart: "oci://public.ecr.aws/eks/aws-load-balancer-controller",
-      namespace: "kube-system",
-      release: "aws-load-balancer-controller",
-      version: "1.8.0",
-      values: {
-        clusterName: cluster.clusterName,
-        serviceAccount: { create: false, name: "aws-load-balancer-controller" },
-        region: this.region,
-        vpcId: vpc.vpcId,
-        enableShield: false,
-        enableWaf: false,
-        enableWafv2: false,
+    // ALB Controller using Kubernetes manifests instead of Helm
+    const albControllerManifest = cluster.addManifest("AWSLoadBalancerController", {
+      apiVersion: "apps/v1",
+      kind: "Deployment",
+      metadata: {
+        name: "aws-load-balancer-controller",
+        namespace: "kube-system",
+        labels: {
+          "app.kubernetes.io/component": "controller",
+          "app.kubernetes.io/name": "aws-load-balancer-controller"
+        }
       },
-      timeout: Duration.minutes(15),
-      wait: true,
-      createNamespace: false,
+      spec: {
+        replicas: 2,
+        selector: {
+          matchLabels: {
+            "app.kubernetes.io/component": "controller",
+            "app.kubernetes.io/name": "aws-load-balancer-controller"
+          }
+        },
+        template: {
+          metadata: {
+            labels: {
+              "app.kubernetes.io/component": "controller",
+              "app.kubernetes.io/name": "aws-load-balancer-controller"
+            }
+          },
+          spec: {
+            containers: [{
+              name: "controller",
+              image: "public.ecr.aws/eks/aws-load-balancer-controller:v2.8.0",
+              args: [
+                "--cluster-name=" + cluster.clusterName,
+                "--ingress-class=alb"
+              ],
+              env: [{
+                name: "AWS_REGION",
+                value: this.region
+              }]
+            }],
+            serviceAccountName: "aws-load-balancer-controller"
+          }
+        }
+      }
     });
-    albChart.node.addDependency(albServiceAccount);
+    albControllerManifest.node.addDependency(albServiceAccount);
 
 
 
@@ -575,8 +601,8 @@ export class AgentEksFargateStack extends Stack {
 
     // cdk8s chart dependencies
     agentChart.node.addDependency(fargateProfile);
-    agentChart.node.addDependency(albChart);
-    albChart.node.addDependency(cluster.awsAuth);
+    agentChart.node.addDependency(albControllerManifest);
+    albControllerManifest.node.addDependency(cluster.awsAuth);
 
     // No finalizer patch needed - proper dependency ordering handles cleanup
 
