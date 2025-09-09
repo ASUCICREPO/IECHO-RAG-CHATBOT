@@ -27,18 +27,13 @@ Once you have deployed the solution, the following user guide will help you navi
     ![yet to be put placeholder](../docs/media/agriculture-specialist-response.png)
     - Agriculture specialist agent offering farming advice with relevant documentation and practical suggestions.
 
-    ![yet to be put placeholder](../docs/media/streaming-response.png)
-    - Real-time streaming responses showing word-by-word generation for immediate user feedback.
-
     ![yet to be put placeholder](../docs/media/citations-and-sources.png)
     - Citation display showing source documents, titles, and relevant excerpts from the knowledge base.
-
-3. Users can provide feedback on responses and access conversation history with automatic session management.
-    ![yet to be put placeholder](../docs/media/rating-system.png)
-    - 5-star rating system with optional feedback comments for continuous system improvement.
 
     ![yet to be put placeholder](../docs/media/follow-up-questions.png)
     - Automatically generated follow-up questions based on the response and conversation context.
 
-    ![yet to be put placeholder](../docs/media/conversation-history.png)
-    - Session-based conversation history maintained for 1 hour with context preservation across multiple queries.
+3. Users can provide feedback on responses.
+    ![yet to be put placeholder](../docs/media/rating-system.png)
+    - 5-star rating system with optional feedback comments for continuous system improvement.
+

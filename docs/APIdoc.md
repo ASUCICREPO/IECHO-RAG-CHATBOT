@@ -1,6 +1,9 @@
 # API Documentation
 
-Base URL: `https://your-api-gateway-url/`
+**Base URL**: The API Gateway URL is dynamically generated during deployment. You can find it in:
+- AWS Console → API Gateway → "iECHO Agent API" → Stages → prod
+- CDK deployment output: `AgentFargateStack.ApiGatewayUrl`
+- Format: `https://{api-id}.execute-api.{region}.amazonaws.com/prod/`
 
 ## Architecture
 
