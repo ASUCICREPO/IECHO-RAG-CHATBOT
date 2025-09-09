@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- AWS CLI installed and configured
+- AWS CLI access (local installation with `aws configure` OR AWS CloudShell)
 - Knowledge Base created manually in AWS Bedrock
 - S3 buckets for documents and vector store
 
@@ -12,9 +12,20 @@
 - **Deployment**: Up to 1 hour for complete infrastructure setup
 - **Cleanup**: Up to 1 hour 30 minutes for complete resource removal
 
+## Deployment Options
+
+### Option 1: AWS CloudShell (Recommended)
+1. Open AWS CloudShell from the AWS Console
+2. No additional configuration needed - credentials are automatically inherited
+3. Optionally set your region: `export AWS_DEFAULT_REGION=us-west-2`
+4. Clone your repository and proceed with deployment
+
+### Option 2: Local Machine
+Requires AWS CLI installed and configured with `aws configure`
+
 ## Required AWS Permissions
 
-### For AWS CLI User (aws configure)
+### For AWS CLI User (aws configure) or CloudShell User
 Your AWS IAM user needs these specific permissions to run the deployment:
 
 **IAM Permissions** (for creating CodeBuild service role):
