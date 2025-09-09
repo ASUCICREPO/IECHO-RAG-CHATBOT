@@ -534,8 +534,7 @@ export class AgentEksFargateStack extends Stack {
 
     // ALB Controller Helm chart
     const albChart = cluster.addHelmChart("AWSLoadBalancerController", {
-      chart: "aws-load-balancer-controller",
-      repository: "https://aws.github.io/eks-charts",
+      chart: "oci://public.ecr.aws/eks/aws-load-balancer-controller",
       namespace: "kube-system",
       release: "aws-load-balancer-controller",
       version: "1.8.0",
