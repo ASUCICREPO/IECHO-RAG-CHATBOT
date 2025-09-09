@@ -80,7 +80,11 @@ Common issues and solutions can be found in the [Troubleshooting Guide](./docs/t
 
 ## Credits
 
-This application was architected and developed by [yet to be put placeholder - team member names and LinkedIn profiles].
+This application was architected and developed by:
+
+- **Sahajpreet Singh Khasria** - Backend Developer ([LinkedIn](https://www.linkedin.com/in/sahajpreet))
+- **Apoorv Singh** - Frontend Developer ([LinkedIn](https://www.linkedin.com/in/apoorv16/))
+- **Jenny Nguyen** - UI/UX Designer ([LinkedIn](https://www.linkedin.com/in/jennnyen/))
 
 Thanks to the development team for their guidance and support in building this intelligent multi-domain RAG chatbot solution.
 
