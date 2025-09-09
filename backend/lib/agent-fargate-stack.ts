@@ -114,8 +114,6 @@ class AgentAppChart extends cdk8s.Chart {
       }
     });
 
-
-
     // Ingress
     new cdk8s.ApiObject(this, "ingress", {
       apiVersion: "networking.k8s.io/v1",
@@ -206,6 +204,11 @@ export class AgentEksFargateStack extends Stack {
 
     vpc.addInterfaceEndpoint("Lambda", {
       service: ec2.InterfaceVpcEndpointAwsService.LAMBDA,
+    });
+
+    // ECR Public endpoint for ALB Controller image
+    vpc.addInterfaceEndpoint("EcrPublic", {
+      service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.ecr.public`),
     });
 
     // Cluster master role
@@ -448,6 +451,8 @@ export class AgentEksFargateStack extends Stack {
       platform: ecrAssets.Platform.LINUX_AMD64,
     });
 
+    // Direct API Gateway integration (no ALB needed)
+
     // ALB Controller SA
     const albServiceAccount = cluster.addServiceAccount("AWSLoadBalancerController", {
       name: "aws-load-balancer-controller",
@@ -475,9 +480,7 @@ export class AgentEksFargateStack extends Stack {
       resources: ["*"],
     }));
 
-
-
-    // ALB Controller via kubectl manifests (no internet required)
+    // ALB Controller via kubectl manifests using ECR Public image
     const albDeployment = cluster.addManifest("ALBControllerDeployment", {
       apiVersion: "apps/v1",
       kind: "Deployment",
@@ -508,7 +511,7 @@ export class AgentEksFargateStack extends Stack {
             serviceAccountName: "aws-load-balancer-controller",
             containers: [{
               name: "controller",
-              image: `602401143452.dkr.ecr.${this.region}.amazonaws.com/amazon/aws-load-balancer-controller:v2.8.0`,
+              image: `public.ecr.aws/eks/aws-load-balancer-controller:v2.8.0`,
               args: [
                 `--cluster-name=${cluster.clusterName}`,
                 "--ingress-class=alb",
