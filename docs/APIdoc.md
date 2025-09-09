@@ -58,12 +58,10 @@ Fast non-streaming chat endpoint with unified multi-agent orchestration.
 {
   "response": "The main symptoms of tuberculosis include persistent cough lasting more than 2-3 weeks, chest pain, coughing up blood or sputum, weakness or fatigue, weight loss, chills, fever, and night sweats.",
   "responseId": "uuid-for-feedback-tracking",
-  "selectedAgent": "TB",
   "citations": [
     {
       "title": "TB Guidelines 2024",
-      "source": "s3://bucket/tb-guidelines.pdf",
-      "excerpt": "Common symptoms include persistent cough..."
+      "source": "s3://bucket/tb-guidelines.pdf"
     }
   ],
   "followUpQuestions": [
@@ -105,7 +103,7 @@ data: {"type": "token", "data": " irrigation"}
 
 data: {"type": "token", "data": " efficiency"}
 
-data: {"type": "complete", "responseId": "uuid", "selectedAgent": "Agriculture", "citations": [...], "followUpQuestions": [...]}
+data: {"type": "complete", "responseId": "uuid", "citations": [...], "followUpQuestions": [...]}
 ```
 
 **Event Types:**
@@ -192,11 +190,16 @@ System status with configuration details.
 }
 ```
 
+## Request Limits
+
+- **Query Length**: Maximum 150 tokens per query
+- **Image Size**: Maximum 5MB for base64-encoded images
+- **Rating Range**: 1-5 stars for feedback submissions
+- **Empty Queries**: Not allowed - queries must contain text
+
 ## Response Limits
 
-- **Token Limit**: 150 tokens per response for concise answers
 - **Timeout**: 25 seconds maximum for streaming responses
-- **Image Size**: 10MB maximum for image uploads
 - **Session Duration**: 1 hour automatic expiration
 
 ## Error Handling
