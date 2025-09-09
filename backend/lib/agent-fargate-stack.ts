@@ -160,7 +160,7 @@ export class AgentEksFargateStack extends Stack {
     // VPC
     const vpc = new ec2.Vpc(this, "AgentVpc", {
       maxAzs: 2,
-      natGateways: 1,
+      natGateways: 0,
     });
 
     // VPC Endpoints for AWS services (cost optimization + security)
@@ -477,27 +477,55 @@ export class AgentEksFargateStack extends Stack {
 
 
 
-    // ALB Controller Helm chart
-    const albChart = cluster.addHelmChart("AWSLoadBalancerController", {
-      chart: "aws-load-balancer-controller",
-      repository: "https://aws.github.io/eks-charts",
-      namespace: "kube-system",
-      release: "aws-load-balancer-controller",
-      version: "1.8.0",
-      values: {
-        clusterName: cluster.clusterName,
-        serviceAccount: { create: false, name: "aws-load-balancer-controller" },
-        region: this.region,
-        vpcId: vpc.vpcId,
-        enableShield: false,
-        enableWaf: false,
-        enableWafv2: false,
+    // ALB Controller via kubectl manifests (no internet required)
+    const albDeployment = cluster.addManifest("ALBControllerDeployment", {
+      apiVersion: "apps/v1",
+      kind: "Deployment",
+      metadata: {
+        name: "aws-load-balancer-controller",
+        namespace: "kube-system",
+        labels: {
+          "app.kubernetes.io/component": "controller",
+          "app.kubernetes.io/name": "aws-load-balancer-controller"
+        }
       },
-      timeout: Duration.minutes(15),
-      wait: true,
-      createNamespace: false,
+      spec: {
+        replicas: 2,
+        selector: {
+          matchLabels: {
+            "app.kubernetes.io/component": "controller",
+            "app.kubernetes.io/name": "aws-load-balancer-controller"
+          }
+        },
+        template: {
+          metadata: {
+            labels: {
+              "app.kubernetes.io/component": "controller",
+              "app.kubernetes.io/name": "aws-load-balancer-controller"
+            }
+          },
+          spec: {
+            serviceAccountName: "aws-load-balancer-controller",
+            containers: [{
+              name: "controller",
+              image: `602401143452.dkr.ecr.${this.region}.amazonaws.com/amazon/aws-load-balancer-controller:v2.8.0`,
+              args: [
+                `--cluster-name=${cluster.clusterName}`,
+                "--ingress-class=alb",
+                `--aws-region=${this.region}`,
+                `--aws-vpc-id=${vpc.vpcId}`
+              ],
+              ports: [{ containerPort: 9443, name: "webhook-server", protocol: "TCP" }],
+              resources: {
+                limits: { cpu: "200m", memory: "500Mi" },
+                requests: { cpu: "100m", memory: "200Mi" }
+              }
+            }]
+          }
+        }
+      }
     });
-    albChart.node.addDependency(albServiceAccount);
+    albDeployment.node.addDependency(albServiceAccount);
 
 
 
@@ -521,8 +549,8 @@ export class AgentEksFargateStack extends Stack {
 
     // cdk8s chart dependencies
     agentChart.node.addDependency(fargateProfile);
-    agentChart.node.addDependency(albChart);
-    albChart.node.addDependency(cluster.awsAuth);
+    agentChart.node.addDependency(albDeployment);
+    albDeployment.node.addDependency(cluster.awsAuth);
 
     // No finalizer patch needed - proper dependency ordering handles cleanup
 
