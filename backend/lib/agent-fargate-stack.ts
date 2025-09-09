@@ -114,6 +114,8 @@ class AgentAppChart extends cdk8s.Chart {
       }
     });
 
+
+
     // Ingress
     new cdk8s.ApiObject(this, "ingress", {
       apiVersion: "networking.k8s.io/v1",
@@ -158,7 +160,7 @@ export class AgentEksFargateStack extends Stack {
     // VPC
     const vpc = new ec2.Vpc(this, "AgentVpc", {
       maxAzs: 2,
-      natGateways: 0,
+      natGateways: 1,
     });
 
     // VPC Endpoints for AWS services (cost optimization + security)
@@ -219,7 +221,7 @@ export class AgentEksFargateStack extends Stack {
       mastersRole: masterRole,
       outputClusterName: true,
       endpointAccess: eks.EndpointAccess.PUBLIC_AND_PRIVATE,
-      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
+      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
       kubectlLayer: new KubectlV32Layer(this, "kubectl"),
       clusterLogging: [
         eks.ClusterLoggingTypes.API,
@@ -310,7 +312,7 @@ export class AgentEksFargateStack extends Stack {
     // Fargate profile with logging
     const fargateProfile = cluster.addFargateProfile("AgentProfile", {
       selectors: [{ namespace: k8sAppNameSpace, labels: { app: "agent-service" } }],
-      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       fargateProfileName: "agent-profile",
     });
 
@@ -446,8 +448,6 @@ export class AgentEksFargateStack extends Stack {
       platform: ecrAssets.Platform.LINUX_AMD64,
     });
 
-    // Direct API Gateway integration (no ALB needed)
-
     // ALB Controller SA
     const albServiceAccount = cluster.addServiceAccount("AWSLoadBalancerController", {
       name: "aws-load-balancer-controller",
@@ -475,55 +475,29 @@ export class AgentEksFargateStack extends Stack {
       resources: ["*"],
     }));
 
-    // ALB Controller via kubectl manifests using ECR Public image
-    const albDeployment = cluster.addManifest("ALBControllerDeployment", {
-      apiVersion: "apps/v1",
-      kind: "Deployment",
-      metadata: {
-        name: "aws-load-balancer-controller",
-        namespace: "kube-system",
-        labels: {
-          "app.kubernetes.io/component": "controller",
-          "app.kubernetes.io/name": "aws-load-balancer-controller"
-        }
+
+
+    // ALB Controller Helm chart
+    const albChart = cluster.addHelmChart("AWSLoadBalancerController", {
+      chart: "aws-load-balancer-controller",
+      repository: "https://aws.github.io/eks-charts",
+      namespace: "kube-system",
+      release: "aws-load-balancer-controller",
+      version: "1.8.0",
+      values: {
+        clusterName: cluster.clusterName,
+        serviceAccount: { create: false, name: "aws-load-balancer-controller" },
+        region: this.region,
+        vpcId: vpc.vpcId,
+        enableShield: false,
+        enableWaf: false,
+        enableWafv2: false,
       },
-      spec: {
-        replicas: 2,
-        selector: {
-          matchLabels: {
-            "app.kubernetes.io/component": "controller",
-            "app.kubernetes.io/name": "aws-load-balancer-controller"
-          }
-        },
-        template: {
-          metadata: {
-            labels: {
-              "app.kubernetes.io/component": "controller",
-              "app.kubernetes.io/name": "aws-load-balancer-controller"
-            }
-          },
-          spec: {
-            serviceAccountName: "aws-load-balancer-controller",
-            containers: [{
-              name: "controller",
-              image: `public.ecr.aws/eks/aws-load-balancer-controller:v2.8.0`,
-              args: [
-                `--cluster-name=${cluster.clusterName}`,
-                "--ingress-class=alb",
-                `--aws-region=${this.region}`,
-                `--aws-vpc-id=${vpc.vpcId}`
-              ],
-              ports: [{ containerPort: 9443, name: "webhook-server", protocol: "TCP" }],
-              resources: {
-                limits: { cpu: "200m", memory: "500Mi" },
-                requests: { cpu: "100m", memory: "200Mi" }
-              }
-            }]
-          }
-        }
-      }
+      timeout: Duration.minutes(15),
+      wait: true,
+      createNamespace: false,
     });
-    albDeployment.node.addDependency(albServiceAccount);
+    albChart.node.addDependency(albServiceAccount);
 
 
 
@@ -547,8 +521,8 @@ export class AgentEksFargateStack extends Stack {
 
     // cdk8s chart dependencies
     agentChart.node.addDependency(fargateProfile);
-    agentChart.node.addDependency(albDeployment);
-    albDeployment.node.addDependency(cluster.awsAuth);
+    agentChart.node.addDependency(albChart);
+    albChart.node.addDependency(cluster.awsAuth);
 
     // No finalizer patch needed - proper dependency ordering handles cleanup
 
@@ -647,11 +621,5 @@ frontend:
     this.exportValue(albDnsProvider.value, { name: "AlbDnsName", description: "The ALB DNS name" });
     this.exportValue(amplifyApp.attrDefaultDomain, { name: "AmplifyAppUrl", description: "The Amplify app URL" });
     this.exportValue(amplifyApp.attrAppId, { name: "AmplifyAppId", description: "The Amplify app ID" });
-    
-    // ALB hostname available via: kubectl get ingress agent-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-    
-    // Note: Use ./destroy.sh script for reliable cleanup
-    // - Script cleans up k8s security groups before CDK destroy
-    // - Prevents VPC deletion failures
   }
 }
