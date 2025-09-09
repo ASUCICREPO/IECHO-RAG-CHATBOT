@@ -30,7 +30,7 @@ interface AgentAppChartProps {
   accountId: string;
   logGroupName: string;
   feedbackTableName: string;
-  publicSubnetIds: string[];
+
 }
 
 class AgentAppChart extends cdk8s.Chart {
@@ -129,7 +129,6 @@ class AgentAppChart extends cdk8s.Chart {
           "alb.ingress.kubernetes.io/healthcheck-path": "/health",
           "alb.ingress.kubernetes.io/load-balancer-attributes": "deletion_protection.enabled=false,idle_timeout.timeout_seconds=300",
           "alb.ingress.kubernetes.io/target-group-attributes": "deregistration_delay.timeout_seconds=30",
-          "alb.ingress.kubernetes.io/subnets": props.publicSubnetIds.join(","),
           "kubernetes.io/ingress.class": "alb"
         }
       },
@@ -158,109 +157,56 @@ export class AgentEksFargateStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // VPC with VPC Endpoints only
+    // VPC
     const vpc = new ec2.Vpc(this, "AgentVpc", {
       maxAzs: 2,
-      natGateways: 0,
-      subnetConfiguration: [
-        {
-          cidrMask: 24,
-          name: 'Public',
-          subnetType: ec2.SubnetType.PUBLIC,
-        },
-        {
-          cidrMask: 24,
-          name: 'Isolated',
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-        }
-      ]
+      natGateways: 1,
     });
 
-    // Security Group for VPC Endpoints
-    const vpcEndpointSg = new ec2.SecurityGroup(this, "VpcEndpointSg", {
-      vpc,
-      description: "Security group for VPC endpoints",
-      allowAllOutbound: false
-    });
-
-    vpcEndpointSg.addIngressRule(
-      ec2.Peer.ipv4(vpc.vpcCidrBlock),
-      ec2.Port.tcp(443),
-      "Allow HTTPS from VPC"
-    );
-
-    // Gateway Endpoints (free)
+    // VPC Endpoints for AWS services (cost optimization + security)
     vpc.addGatewayEndpoint("S3Endpoint", {
       service: ec2.GatewayVpcEndpointAwsService.S3,
-      subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }]
     });
 
     vpc.addGatewayEndpoint("DynamoDbEndpoint", {
       service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
-      subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }]
     });
 
-    // Interface Endpoints (required for EKS)
     vpc.addInterfaceEndpoint("EcrApi", {
       service: ec2.InterfaceVpcEndpointAwsService.ECR,
-      securityGroups: [vpcEndpointSg],
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      privateDnsEnabled: true
     });
 
     vpc.addInterfaceEndpoint("EcrDkr", {
       service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER,
-      securityGroups: [vpcEndpointSg],
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      privateDnsEnabled: true
     });
 
     vpc.addInterfaceEndpoint("CloudWatchLogs", {
       service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
-      securityGroups: [vpcEndpointSg],
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      privateDnsEnabled: true
-    });
-
-    // CRITICAL: EKS endpoint for kubectl operations
-    vpc.addInterfaceEndpoint("Eks", {
-      service: ec2.InterfaceVpcEndpointAwsService.EKS,
-      securityGroups: [vpcEndpointSg],
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      privateDnsEnabled: true
-    });
-
-    vpc.addInterfaceEndpoint("Sts", {
-      service: ec2.InterfaceVpcEndpointAwsService.STS,
-      securityGroups: [vpcEndpointSg],
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      privateDnsEnabled: true
-    });
-
-    // EC2 endpoint (required for EKS cluster creation)
-    vpc.addInterfaceEndpoint("Ec2", {
-      service: ec2.InterfaceVpcEndpointAwsService.EC2,
-      securityGroups: [vpcEndpointSg],
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      privateDnsEnabled: true
-    });
-
-    // Lambda endpoint for kubectl functions
-    vpc.addInterfaceEndpoint("Lambda", {
-      service: ec2.InterfaceVpcEndpointAwsService.LAMBDA,
-      securityGroups: [vpcEndpointSg],
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      privateDnsEnabled: true
     });
 
     vpc.addInterfaceEndpoint("Bedrock", {
       service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.bedrock-runtime`),
-      securityGroups: [vpcEndpointSg],
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      privateDnsEnabled: true
     });
 
+    vpc.addInterfaceEndpoint("BedrockAgent", {
+      service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.bedrock-agent`),
+    });
 
+    vpc.addInterfaceEndpoint("Sts", {
+      service: ec2.InterfaceVpcEndpointAwsService.STS,
+    });
+
+    vpc.addInterfaceEndpoint("Eks", {
+      service: ec2.InterfaceVpcEndpointAwsService.EKS,
+    });
+
+    vpc.addInterfaceEndpoint("Ec2", {
+      service: ec2.InterfaceVpcEndpointAwsService.EC2,
+    });
+
+    vpc.addInterfaceEndpoint("Lambda", {
+      service: ec2.InterfaceVpcEndpointAwsService.LAMBDA,
+    });
 
     // Cluster master role
     const masterRole = new iam.Role(this, "ClusterMasterRole", {
@@ -268,15 +214,15 @@ export class AgentEksFargateStack extends Stack {
     });
     masterRole.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
-    // EKS Fargate cluster with kubectl handlers in VPC
+    // EKS Fargate cluster
     const cluster = new eks.FargateCluster(this, "AgentCluster", {
       vpc,
       version: eks.KubernetesVersion.V1_32,
       mastersRole: masterRole,
       outputClusterName: true,
       endpointAccess: eks.EndpointAccess.PUBLIC_AND_PRIVATE,
+      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
       kubectlLayer: new KubectlV32Layer(this, "kubectl"),
-      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
       clusterLogging: [
         eks.ClusterLoggingTypes.API,
         eks.ClusterLoggingTypes.AUDIT,
@@ -366,8 +312,7 @@ export class AgentEksFargateStack extends Stack {
     // Fargate profile with logging
     const fargateProfile = cluster.addFargateProfile("AgentProfile", {
       selectors: [{ namespace: k8sAppNameSpace, labels: { app: "agent-service" } }],
-      vpc: vpc,
-      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       fargateProfileName: "agent-profile",
     });
 
@@ -532,52 +477,27 @@ export class AgentEksFargateStack extends Stack {
 
 
 
-    // ALB Controller using Kubernetes manifests instead of Helm
-    const albControllerManifest = cluster.addManifest("AWSLoadBalancerController", {
-      apiVersion: "apps/v1",
-      kind: "Deployment",
-      metadata: {
-        name: "aws-load-balancer-controller",
-        namespace: "kube-system",
-        labels: {
-          "app.kubernetes.io/component": "controller",
-          "app.kubernetes.io/name": "aws-load-balancer-controller"
-        }
+    // ALB Controller Helm chart
+    const albChart = cluster.addHelmChart("AWSLoadBalancerController", {
+      chart: "aws-load-balancer-controller",
+      repository: "https://aws.github.io/eks-charts",
+      namespace: "kube-system",
+      release: "aws-load-balancer-controller",
+      version: "1.8.0",
+      values: {
+        clusterName: cluster.clusterName,
+        serviceAccount: { create: false, name: "aws-load-balancer-controller" },
+        region: this.region,
+        vpcId: vpc.vpcId,
+        enableShield: false,
+        enableWaf: false,
+        enableWafv2: false,
       },
-      spec: {
-        replicas: 2,
-        selector: {
-          matchLabels: {
-            "app.kubernetes.io/component": "controller",
-            "app.kubernetes.io/name": "aws-load-balancer-controller"
-          }
-        },
-        template: {
-          metadata: {
-            labels: {
-              "app.kubernetes.io/component": "controller",
-              "app.kubernetes.io/name": "aws-load-balancer-controller"
-            }
-          },
-          spec: {
-            containers: [{
-              name: "controller",
-              image: "public.ecr.aws/eks/aws-load-balancer-controller:v2.8.0",
-              args: [
-                "--cluster-name=" + cluster.clusterName,
-                "--ingress-class=alb"
-              ],
-              env: [{
-                name: "AWS_REGION",
-                value: this.region
-              }]
-            }],
-            serviceAccountName: "aws-load-balancer-controller"
-          }
-        }
-      }
+      timeout: Duration.minutes(15),
+      wait: true,
+      createNamespace: false,
     });
-    albControllerManifest.node.addDependency(albServiceAccount);
+    albChart.node.addDependency(albServiceAccount);
 
 
 
@@ -593,7 +513,7 @@ export class AgentEksFargateStack extends Stack {
       accountId: this.account,
       logGroupName: logGroup.logGroupName,
       feedbackTableName: feedbackTable.tableName,
-      publicSubnetIds: vpc.publicSubnets.map(subnet => subnet.subnetId),
+
 
     });
     
@@ -601,8 +521,8 @@ export class AgentEksFargateStack extends Stack {
 
     // cdk8s chart dependencies
     agentChart.node.addDependency(fargateProfile);
-    agentChart.node.addDependency(albControllerManifest);
-    albControllerManifest.node.addDependency(cluster.awsAuth);
+    agentChart.node.addDependency(albChart);
+    albChart.node.addDependency(cluster.awsAuth);
 
     // No finalizer patch needed - proper dependency ordering handles cleanup
 
