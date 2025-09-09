@@ -157,7 +157,7 @@ export class AgentEksFargateStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // VPC with VPC Endpoints (no NAT Gateway)
+    // VPC with VPC Endpoints only
     const vpc = new ec2.Vpc(this, "AgentVpc", {
       maxAzs: 2,
       natGateways: 0,
@@ -188,7 +188,7 @@ export class AgentEksFargateStack extends Stack {
       "Allow HTTPS from VPC"
     );
 
-    // Gateway Endpoints (no cost)
+    // Gateway Endpoints (free)
     vpc.addGatewayEndpoint("S3Endpoint", {
       service: ec2.GatewayVpcEndpointAwsService.S3,
       subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }]
@@ -199,48 +199,67 @@ export class AgentEksFargateStack extends Stack {
       subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }]
     });
 
-    // Interface Endpoints with explicit dependencies
-    const ecrApiEndpoint = vpc.addInterfaceEndpoint("EcrApi", {
+    // Interface Endpoints (required for EKS)
+    vpc.addInterfaceEndpoint("EcrApi", {
       service: ec2.InterfaceVpcEndpointAwsService.ECR,
       securityGroups: [vpcEndpointSg],
       subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       privateDnsEnabled: true
     });
 
-    const ecrDkrEndpoint = vpc.addInterfaceEndpoint("EcrDkr", {
+    vpc.addInterfaceEndpoint("EcrDkr", {
       service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER,
       securityGroups: [vpcEndpointSg],
       subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       privateDnsEnabled: true
     });
 
-    const logsEndpoint = vpc.addInterfaceEndpoint("CloudWatchLogs", {
+    vpc.addInterfaceEndpoint("CloudWatchLogs", {
       service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
       securityGroups: [vpcEndpointSg],
       subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       privateDnsEnabled: true
     });
 
-    const eksEndpoint = vpc.addInterfaceEndpoint("Eks", {
+    // CRITICAL: EKS endpoint for kubectl operations
+    vpc.addInterfaceEndpoint("Eks", {
       service: ec2.InterfaceVpcEndpointAwsService.EKS,
       securityGroups: [vpcEndpointSg],
       subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       privateDnsEnabled: true
     });
 
-    const stsEndpoint = vpc.addInterfaceEndpoint("Sts", {
+    vpc.addInterfaceEndpoint("Sts", {
       service: ec2.InterfaceVpcEndpointAwsService.STS,
       securityGroups: [vpcEndpointSg],
       subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       privateDnsEnabled: true
     });
 
-    const bedrockEndpoint = vpc.addInterfaceEndpoint("Bedrock", {
+    // EC2 endpoint (required for EKS cluster creation)
+    vpc.addInterfaceEndpoint("Ec2", {
+      service: ec2.InterfaceVpcEndpointAwsService.EC2,
+      securityGroups: [vpcEndpointSg],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      privateDnsEnabled: true
+    });
+
+    // Lambda endpoint for kubectl functions
+    vpc.addInterfaceEndpoint("Lambda", {
+      service: ec2.InterfaceVpcEndpointAwsService.LAMBDA,
+      securityGroups: [vpcEndpointSg],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      privateDnsEnabled: true
+    });
+
+    vpc.addInterfaceEndpoint("Bedrock", {
       service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.bedrock-runtime`),
       securityGroups: [vpcEndpointSg],
       subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       privateDnsEnabled: true
     });
+
+
 
     // Cluster master role
     const masterRole = new iam.Role(this, "ClusterMasterRole", {
@@ -248,7 +267,7 @@ export class AgentEksFargateStack extends Stack {
     });
     masterRole.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
-    // EKS Fargate cluster with endpoint dependencies
+    // EKS Fargate cluster with kubectl handlers in VPC
     const cluster = new eks.FargateCluster(this, "AgentCluster", {
       vpc,
       version: eks.KubernetesVersion.V1_32,
@@ -256,6 +275,7 @@ export class AgentEksFargateStack extends Stack {
       outputClusterName: true,
       endpointAccess: eks.EndpointAccess.PUBLIC_AND_PRIVATE,
       vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
+      placeClusterHandlerInVpc: true,
       kubectlLayer: new KubectlV32Layer(this, "kubectl"),
       clusterLogging: [
         eks.ClusterLoggingTypes.API,
@@ -265,12 +285,6 @@ export class AgentEksFargateStack extends Stack {
         eks.ClusterLoggingTypes.SCHEDULER,
       ],
     });
-
-    // Ensure VPC endpoints are ready before EKS operations
-    cluster.node.addDependency(ecrApiEndpoint);
-    cluster.node.addDependency(ecrDkrEndpoint);
-    cluster.node.addDependency(eksEndpoint);
-    cluster.node.addDependency(stsEndpoint);
 
 
 
