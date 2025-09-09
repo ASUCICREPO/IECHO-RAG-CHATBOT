@@ -169,7 +169,7 @@ export class AgentEksFargateStack extends Stack {
         },
         {
           cidrMask: 24,
-          name: 'Private',
+          name: 'Isolated',
           subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
         }
       ]
