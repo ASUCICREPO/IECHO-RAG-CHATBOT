@@ -220,7 +220,7 @@ else
     --artifacts "$ARTIFACTS" \
     --environment "$ENVIRONMENT" \
     --service-role "$ROLE_ARN" \
-    --source-version "full-cdk" \
+    --source-version "main" \
     --output json \
     --no-cli-pager >/dev/null
   echo "✓ CodeBuild project created"
@@ -231,7 +231,7 @@ fi
 echo "Starting build..."
 BUILD_ID=$(aws codebuild start-build \
   --project-name "$PROJECT_NAME" \
-  --source-version "full-cdk" \
+  --source-version "main" \
   --query 'build.id' \
   --output text)
 
