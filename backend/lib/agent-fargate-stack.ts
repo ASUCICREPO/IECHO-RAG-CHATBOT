@@ -199,26 +199,43 @@ export class AgentEksFargateStack extends Stack {
       subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }]
     });
 
-    // Interface Endpoints
-    const interfaceEndpoints = [
-      { name: "EcrApi", service: ec2.InterfaceVpcEndpointAwsService.ECR },
-      { name: "EcrDkr", service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER },
-      { name: "CloudWatchLogs", service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS },
-      { name: "Eks", service: ec2.InterfaceVpcEndpointAwsService.EKS },
-      { name: "Sts", service: ec2.InterfaceVpcEndpointAwsService.STS },
-    ];
-
-    interfaceEndpoints.forEach(endpoint => {
-      vpc.addInterfaceEndpoint(endpoint.name, {
-        service: endpoint.service,
-        securityGroups: [vpcEndpointSg],
-        subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-        privateDnsEnabled: true
-      });
+    // Interface Endpoints with explicit dependencies
+    const ecrApiEndpoint = vpc.addInterfaceEndpoint("EcrApi", {
+      service: ec2.InterfaceVpcEndpointAwsService.ECR,
+      securityGroups: [vpcEndpointSg],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      privateDnsEnabled: true
     });
 
-    // Bedrock endpoint
-    vpc.addInterfaceEndpoint("Bedrock", {
+    const ecrDkrEndpoint = vpc.addInterfaceEndpoint("EcrDkr", {
+      service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER,
+      securityGroups: [vpcEndpointSg],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      privateDnsEnabled: true
+    });
+
+    const logsEndpoint = vpc.addInterfaceEndpoint("CloudWatchLogs", {
+      service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
+      securityGroups: [vpcEndpointSg],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      privateDnsEnabled: true
+    });
+
+    const eksEndpoint = vpc.addInterfaceEndpoint("Eks", {
+      service: ec2.InterfaceVpcEndpointAwsService.EKS,
+      securityGroups: [vpcEndpointSg],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      privateDnsEnabled: true
+    });
+
+    const stsEndpoint = vpc.addInterfaceEndpoint("Sts", {
+      service: ec2.InterfaceVpcEndpointAwsService.STS,
+      securityGroups: [vpcEndpointSg],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      privateDnsEnabled: true
+    });
+
+    const bedrockEndpoint = vpc.addInterfaceEndpoint("Bedrock", {
       service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.bedrock-runtime`),
       securityGroups: [vpcEndpointSg],
       subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
@@ -231,7 +248,7 @@ export class AgentEksFargateStack extends Stack {
     });
     masterRole.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
-    // EKS Fargate cluster
+    // EKS Fargate cluster with endpoint dependencies
     const cluster = new eks.FargateCluster(this, "AgentCluster", {
       vpc,
       version: eks.KubernetesVersion.V1_32,
@@ -248,6 +265,12 @@ export class AgentEksFargateStack extends Stack {
         eks.ClusterLoggingTypes.SCHEDULER,
       ],
     });
+
+    // Ensure VPC endpoints are ready before EKS operations
+    cluster.node.addDependency(ecrApiEndpoint);
+    cluster.node.addDependency(ecrDkrEndpoint);
+    cluster.node.addDependency(eksEndpoint);
+    cluster.node.addDependency(stsEndpoint);
 
 
 
