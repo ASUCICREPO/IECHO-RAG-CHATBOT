@@ -7,12 +7,14 @@
 
 ## Architecture
 
-The API uses a multi-agent architecture powered by the Strands framework:
+The API uses a multi-agent architecture powered by the Strands framework for educational purposes:
 - **Orchestrator Agent**: Analyzes queries and routes to appropriate specialist agents using natural language understanding
-- **TB Specialist Agent**: Handles tuberculosis and health-related questions with knowledge base integration
-- **Agriculture Specialist Agent**: Manages farming, crops, irrigation, food safety, and water management queries
+- **TB Specialist Agent**: Provides educational information about tuberculosis and health topics with knowledge base integration
+- **Agriculture Specialist Agent**: Offers educational content on farming, crops, irrigation, food safety, and water management
 - **Image Analysis**: Optional image processing via strands_tools.image_reader for visual content understanding
 - **Knowledge Base Integration**: AWS Bedrock Knowledge Base with Titan G1 Multimodal embeddings and hierarchical chunking
+
+**Important**: This is an educational tool and should not be used for medical diagnosis or treatment decisions.
 
 ## Authentication
 
@@ -35,7 +37,7 @@ Health check endpoint for load balancer monitoring.
 
 ### POST /chat
 
-Fast non-streaming chat endpoint with unified multi-agent orchestration.
+Educational chat endpoint with multi-agent orchestration for TB and Agriculture topics.
 
 **Request Body:**
 ```json
@@ -48,7 +50,7 @@ Fast non-streaming chat endpoint with unified multi-agent orchestration.
 ```
 
 **Parameters:**
-- `query` (string, required): User's question - automatically routed to TB, Agriculture, or General agents
+- `query` (string, required): User's educational question - automatically routed to TB or Agriculture specialists
 - `userId` (string, required): User identifier for logging and feedback tracking
 - `sessionId` (string, optional): Session ID for conversation continuity (auto-generated if not provided)
 - `image` (string, optional): Base64-encoded image data for visual analysis
@@ -190,16 +192,12 @@ System status with configuration details.
 }
 ```
 
-## Request Limits
+## Request Validation
 
 - **Query Length**: Maximum 150 tokens per query
-- **Image Size**: Maximum 5MB for base64-encoded images
+- **Image Size**: Maximum 5MB for base64-encoded images  
 - **Rating Range**: 1-5 stars for feedback submissions
 - **Empty Queries**: Not allowed - queries must contain text
-
-## Response Limits
-
-- **Timeout**: 25 seconds maximum for streaming responses
 - **Session Duration**: 1 hour automatic expiration
 
 ## Error Handling
@@ -231,11 +229,11 @@ The orchestrator automatically routes queries based on content analysis:
 - Health-related questions
 
 **Capabilities:**
-- TB diagnosis and symptoms analysis
-- Treatment protocols and medications
-- Infection control and prevention
-- Patient care guidelines
-- Lab test interpretation (smear, GeneXpert)
+- TB diagnosis & symptoms analysis
+- Treatment protocols & medications (HRZE, MDR/XDR management)
+- Infection control & prevention strategies
+- Patient care guidelines & counseling
+- Lab test interpretation (smear, GeneXpert, imaging)
 
 ### Agriculture Specialist Agent
 **Triggers:**
@@ -244,23 +242,10 @@ The orchestrator automatically routes queries based on content analysis:
 - Food safety and nutrition questions
 
 **Capabilities:**
-- Crop and soil management
-- Irrigation and fertigation advice
-- Integrated Pest Management (IPM)
-- Yield optimization strategies
-- Post-harvest handling
-- Food safety guidelines
-
-### General Agent
-**Triggers:**
-- General health and education topics
-- Questions outside TB and agriculture domains
-
-**Capabilities:**
-- General health information
-- Educational content
-- Nutrition guidance
-- Wellness advice
+- Crop & soil management, irrigation, fertigation
+- Integrated Pest Management (IPM) & yield optimization
+- Food safety & nutrition, post-harvest handling
+- Practical farm best practices & infrastructure
 
 ## Image Analysis
 
@@ -275,20 +260,13 @@ The orchestrator automatically routes queries based on content analysis:
 2. Temporary file created for analysis
 3. strands_tools.image_reader processes visual content
 4. Analysis results combined with text query
-5. Appropriate specialist agent selected
+5. Appropriate specialist agent selected (TB or Agriculture)
 6. Response generated with image context
 
 ### Use Cases
-- Medical images for TB-related analysis
-- Crop photos for agricultural diagnosis
-- General health and nutrition images
+- Images for TB-related educational analysis
+- Image for agricultural related educational analysis
 - Visual documentation analysis
-
-## Rate Limiting
-
-- **Per User**: 100 requests per hour
-- **Per Session**: 50 requests per session
-- **Global**: 1000 requests per minute
 
 ## Monitoring and Logging
 
