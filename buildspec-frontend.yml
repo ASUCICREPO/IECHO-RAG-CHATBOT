@@ -36,6 +36,8 @@ phases:
     commands:
       - echo "🚀 Deploying frontend to Amplify..."
       - echo $AMPLIFY_APP_ID
+      - echo "Creating main branch if it doesn't exist..."
+      - aws amplify create-branch --app-id $AMPLIFY_APP_ID --branch-name main --stage PRODUCTION || echo "Branch may already exist"
       - echo "Creating Amplify deployment..."
       - >-
         aws amplify create-deployment \
