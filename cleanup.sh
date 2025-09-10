@@ -58,10 +58,10 @@ else
 fi
 
 # --------------------------------------------------
-# 3. Clean up security group dependencies
+# 3. Clean up EKS and network dependencies
 # --------------------------------------------------
 
-echo "🔒 Cleaning up security group dependencies..."
+echo "🔒 Cleaning up EKS and network dependencies..."
 
 STACK_NAME="AgentFargateStack"
 
@@ -71,6 +71,21 @@ if aws cloudformation describe-stacks --stack-name "$STACK_NAME" >/dev/null 2>&1
   if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
     echo "Found VPC: $VPC_ID"
     
+    # Clean up network interfaces first
+    echo "Cleaning up network interfaces..."
+    ENI_IDS=$(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkInterfaces[?Status==`available`].NetworkInterfaceId' --output text 2>/dev/null)
+    for eni_id in $ENI_IDS; do
+      if [ -n "$eni_id" ]; then
+        echo "Deleting network interface: $eni_id"
+        aws ec2 delete-network-interface --network-interface-id "$eni_id" 2>/dev/null || true
+      fi
+    done
+    
+    # Wait a bit for network interfaces to be cleaned up
+    sleep 5
+    
+    # Clean up security group rules
+    echo "Cleaning up security group rules..."
     SG_IDS=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null)
     
     for sg_id in $SG_IDS; do
@@ -94,7 +109,7 @@ if aws cloudformation describe-stacks --stack-name "$STACK_NAME" >/dev/null 2>&1
       fi
     done
     
-    echo "✅ Security group dependencies cleaned up"
+    echo "✅ Network dependencies cleaned up"
   fi
 fi
 
