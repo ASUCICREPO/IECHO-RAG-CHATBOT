@@ -14,73 +14,28 @@ phases:
 
   pre_build:
     commands:
-      - |
-        if [ "$ACTION" != "destroy" ]; then
-          echo "Building TypeScript sources";
-          npm run build;
-          echo "Bootstrapping CDK (no approval)...";
-          cdk bootstrap --require-approval never \
-            -c knowledgeBaseId=$KNOWLEDGE_BASE_ID \
-            -c githubOwner=$GITHUB_OWNER \
-            -c githubRepo=$GITHUB_REPO \
-            -c documentsBucketName=$DOCUMENTS_BUCKET || true;
-        else
-          echo "Destroy mode - skipping build and bootstrap";
-        fi
+      - echo "Building TypeScript sources"
+      - npm run build
+      - echo "Bootstrapping CDK (no approval)..."
+      - cdk bootstrap --require-approval never -c knowledgeBaseId=$KNOWLEDGE_BASE_ID -c githubOwner=$GITHUB_OWNER -c githubRepo=$GITHUB_REPO -c documentsBucketName=$DOCUMENTS_BUCKET || true
 
   build:
     commands:
-      - >-
-        if [ "$ACTION" = "destroy" ]; then
-          echo "Destroying CDK stack...";
-          
-          # First attempt CDK destroy
-          cdk destroy --force || {
-            echo "CDK destroy failed, cleaning up k8s security groups...";
-            
-            # Delete k8s security groups
-            aws ec2 describe-security-groups --filters "Name=group-name,Values=k8s-*" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null | xargs -r -n1 aws ec2 delete-security-group --group-id 2>/dev/null || true;
-            
-            # Wait for cleanup
-            sleep 10;
-            
-            # Retry CDK destroy
-            echo "Retrying CDK destroy...";
-            cdk destroy --force;
-          };
-        else
-          echo "Deploying CDK stack...";
-          cdk deploy --require-approval never \
-            -c knowledgeBaseId=$KNOWLEDGE_BASE_ID \
-            -c githubOwner=$GITHUB_OWNER \
-            -c githubRepo=$GITHUB_REPO \
-            -c documentsBucketName=$DOCUMENTS_BUCKET;
-        fi
+      - echo "Deploying CDK stack..."
+      - cdk deploy --require-approval never -c knowledgeBaseId=$KNOWLEDGE_BASE_ID -c githubOwner=$GITHUB_OWNER -c githubRepo=$GITHUB_REPO -c documentsBucketName=$DOCUMENTS_BUCKET
 
   post_build:
     commands:
-      - |
-        if [ "$ACTION" = "destroy" ]; then
-          echo "";
-          echo "🗑️  DESTROY COMPLETE! 🗑️";
-          echo "All resources have been successfully destroyed.";
-          echo "";
-        else
-          echo "";
-          echo "🚀 BACKEND DEPLOYMENT COMPLETE! 🚀";
-          echo "Backend infrastructure is now live!";
-          echo "";
-          echo "📋 Backend Deployment Summary:";
-          
-          # Get URLs from CDK stack outputs
-          API_URL=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportApiGatewayUrl`].OutputValue' --output text 2>/dev/null);
-          AMPLIFY_URL=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppUrl`].OutputValue' --output text 2>/dev/null);
-          AMPLIFY_APP_ID=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppId`].OutputValue' --output text 2>/dev/null);
-          
-          echo "   🌐 API Gateway: $API_URL";
-          echo "   📱 Amplify App ID: $AMPLIFY_APP_ID";
-          echo "   🔗 Frontend URL: https://$AMPLIFY_URL";
-          
-          echo "";
-          echo "✅ Backend ready! Frontend deployment will follow...";
-        fi
+      - echo ""
+      - echo "🚀 BACKEND DEPLOYMENT COMPLETE! 🚀"
+      - echo "Backend infrastructure is now live!"
+      - echo ""
+      - echo "📋 Backend Deployment Summary:"
+      - API_URL=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportApiGatewayUrl`].OutputValue' --output text 2>/dev/null)
+      - AMPLIFY_URL=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppUrl`].OutputValue' --output text 2>/dev/null)
+      - AMPLIFY_APP_ID=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppId`].OutputValue' --output text 2>/dev/null)
+      - echo "   🌐 API Gateway: $API_URL"
+      - echo "   📱 Amplify App ID: $AMPLIFY_APP_ID"
+      - echo "   🔗 Frontend URL: https://$AMPLIFY_URL"
+      - echo ""
+      - echo "✅ Backend ready! Frontend deployment will follow..."

@@ -3,57 +3,38 @@ set -euo pipefail
 
 # --------------------------------------------------
 # iECHO RAG Chatbot Deployment Script
-# Usage: ./deploy.sh [destroy]
+# Usage: ./deploy.sh
 # --------------------------------------------------
 
-ACTION="${1:-deploy}"
-
-if [ "$ACTION" = "destroy" ]; then
-  echo "🗑️  Starting iECHO RAG Chatbot Cleanup..."
-else
-  echo "🚀 Starting iECHO RAG Chatbot Deployment..."
-fi
+echo "🚀 Starting iECHO RAG Chatbot Deployment..."
 
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
 PROJECT_NAME="iecho-rag-${TIMESTAMP}"
 
 echo "📋 Project: $PROJECT_NAME"
-echo "🎯 Action: $ACTION"
 
 # --------------------------------------------------
 # Configuration
 # --------------------------------------------------
 
-if [ "$ACTION" != "destroy" ]; then
-  # Prompt for required parameters
-  read -rp "Enter Bedrock Knowledge Base ID: " KNOWLEDGE_BASE_ID
-  read -rp "Enter Documents Bucket Name: " DOCUMENTS_BUCKET
+# Prompt for required parameters
+read -rp "Enter Bedrock Knowledge Base ID: " KNOWLEDGE_BASE_ID
+read -rp "Enter Documents Bucket Name: " DOCUMENTS_BUCKET
 
-  # Hardcoded GitHub values
-  GITHUB_OWNER="ASUCICREPO"
-  GITHUB_REPO="IECHO-RAG-CHATBOT"
+# Hardcoded GitHub values
+GITHUB_OWNER="ASUCICREPO"
+GITHUB_REPO="IECHO-RAG-CHATBOT"
 
-  # Validate inputs
-  if [ -z "$KNOWLEDGE_BASE_ID" ] || [ -z "$DOCUMENTS_BUCKET" ]; then
-    echo "❌ Error: Knowledge Base ID and Documents Bucket are required for deployment"
-    exit 1
-  fi
-
-  echo "✅ Configuration:"
-  echo "  - Knowledge Base ID: $KNOWLEDGE_BASE_ID"
-  echo "  - GitHub: $GITHUB_OWNER/$GITHUB_REPO"
-  echo "  - Documents Bucket: $DOCUMENTS_BUCKET"
-else
-  # For destroy, try to find existing project
-  echo "Available CodeBuild projects:"
-  aws codebuild list-projects --query 'projects[?contains(@, `iecho-rag`)]' --output table || echo "No iECHO projects found"
-  echo ""
-  read -rp "Enter project name to destroy (or press Enter to use latest): " EXISTING_PROJECT
-  
-  if [ -n "$EXISTING_PROJECT" ]; then
-    PROJECT_NAME="$EXISTING_PROJECT"
-  fi
+# Validate inputs
+if [ -z "$KNOWLEDGE_BASE_ID" ] || [ -z "$DOCUMENTS_BUCKET" ]; then
+  echo "❌ Error: Knowledge Base ID and Documents Bucket are required for deployment"
+  exit 1
 fi
+
+echo "✅ Configuration:"
+echo "  - Knowledge Base ID: $KNOWLEDGE_BASE_ID"
+echo "  - GitHub: $GITHUB_OWNER/$GITHUB_REPO"
+echo "  - Documents Bucket: $DOCUMENTS_BUCKET"
 
 # --------------------------------------------------
 # Create/Check IAM Role
@@ -440,14 +421,6 @@ echo "🔨 Creating CodeBuild project: $CODEBUILD_PROJECT"
 # Build environment variables
 ENV_VARS='[
   {
-    "name": "ACTION",
-    "value": "'$ACTION'",
-    "type": "PLAINTEXT"
-  }'
-
-if [ "$ACTION" != "destroy" ]; then
-  ENV_VARS="$ENV_VARS"',
-  {
     "name": "KNOWLEDGE_BASE_ID",
     "value": "'$KNOWLEDGE_BASE_ID'",
     "type": "PLAINTEXT"
@@ -466,10 +439,8 @@ if [ "$ACTION" != "destroy" ]; then
     "name": "DOCUMENTS_BUCKET",
     "value": "'$DOCUMENTS_BUCKET'",
     "type": "PLAINTEXT"
-  }'
-fi
-
-ENV_VARS="$ENV_VARS"']'
+  }
+]'
 
 ENVIRONMENT='{
   "type": "LINUX_CONTAINER",
@@ -527,30 +498,15 @@ while [ "$BUILD_STATUS" = "IN_PROGRESS" ]; do
 done
 
 # --------------------------------------------------
-# Cleanup and Results
-# --------------------------------------------------
-
-if [ "$ACTION" = "destroy" ]; then
-  echo "🧹 Cleaning up IAM role..."
-  aws iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "iECHODeploymentPolicy" >/dev/null 2>&1 || true
-  aws iam delete-role --role-name "$ROLE_NAME" >/dev/null 2>&1 || true
-fi
-
-# --------------------------------------------------
 # Final Status
 # --------------------------------------------------
 
 if [ "$BUILD_STATUS" = "SUCCEEDED" ]; then
-  if [ "$ACTION" = "destroy" ]; then
-    echo ""
-    echo "🎉 Cleanup completed successfully!"
-    echo "✅ All iECHO RAG Chatbot resources have been destroyed"
-  else
-    echo ""
-    echo "🎉 Backend deployment completed successfully!"
-    
-    # Now deploy frontend
-    echo "🎨 Starting frontend deployment..."
+  echo ""
+  echo "🎉 Backend deployment completed successfully!"
+  
+  # Now deploy frontend
+  echo "🎨 Starting frontend deployment..."
     
     # Get backend outputs for frontend
     CDK_OUTPUTS=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs' --output json --no-cli-pager)
@@ -690,7 +646,6 @@ if [ "$BUILD_STATUS" = "SUCCEEDED" ]; then
       aws s3 rm s3://$S3_BUCKET --recursive >/dev/null 2>&1 || true
       aws s3 rb s3://$S3_BUCKET >/dev/null 2>&1 || true
     fi
-  fi
 else
   echo ""
   echo "❌ Build failed with status: $BUILD_STATUS"
