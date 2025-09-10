@@ -67,10 +67,10 @@ phases:
           echo "";
         else
           echo "";
-          echo "🚀 DEPLOYMENT COMPLETE! 🚀";
-          echo "Your iECHO RAG Chatbot is now live!";
+          echo "🚀 BACKEND DEPLOYMENT COMPLETE! 🚀";
+          echo "Backend infrastructure is now live!";
           echo "";
-          echo "📋 Deployment Summary:";
+          echo "📋 Backend Deployment Summary:";
           
           # Get URLs from CDK stack outputs
           API_URL=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportApiGatewayUrl`].OutputValue' --output text 2>/dev/null);
@@ -78,15 +78,9 @@ phases:
           AMPLIFY_APP_ID=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppId`].OutputValue' --output text 2>/dev/null);
           
           echo "   🌐 API Gateway: $API_URL";
-          echo "   📱 Frontend: https://$AMPLIFY_URL";
-          
-          # Trigger Amplify build (optional)
-          if [ -n "$AMPLIFY_APP_ID" ] && [ "$AMPLIFY_APP_ID" != "None" ]; then
-            echo "";
-            echo "Triggering Amplify build...";
-            aws amplify start-job --app-id $AMPLIFY_APP_ID --branch-name main --job-type RELEASE >/dev/null 2>&1 && echo "✅ Amplify build started" || echo "🔄 Amplify build already running or failed";
-          fi;
+          echo "   📱 Amplify App ID: $AMPLIFY_APP_ID";
+          echo "   🔗 Frontend URL: https://$AMPLIFY_URL";
           
           echo "";
-          echo "✅ Ready to use!";
+          echo "✅ Backend ready! Frontend deployment will follow...";
         fi

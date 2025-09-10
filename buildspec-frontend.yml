@@ -1,0 +1,63 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+      python: 3.9
+    commands:
+      - echo "Installing zip utility..."
+      - yum install -y zip
+      - echo "Changing into frontend directory"
+      - cd frontend
+
+  pre_build:
+    commands:
+      - echo "Installing frontend dependencies..."
+      - npm ci
+      - echo "Creating .env file with environment variables..."
+      - |
+        cat > .env << EOF
+        # Environment variables for iECHO RAG Chatbot
+        NEXT_PUBLIC_API_BASE_URL=$API_GATEWAY_URL
+        EOF
+      - echo "Contents of .env file:"
+      - cat .env
+
+  build:
+    commands:
+      - echo "Building Next.js application..."
+      - npm run build
+      - echo "Creating deployment package..."
+      - cd out && zip -r build.zip .
+      - echo "Frontend build completed successfully"
+
+  post_build:
+    commands:
+      - echo "🚀 Deploying frontend to Amplify..."
+      - echo "Amplify App ID: $AMPLIFY_APP_ID"
+      - echo "Creating Amplify deployment..."
+      - >-
+        aws amplify create-deployment \
+          --app-id $AMPLIFY_APP_ID \
+          --branch-name main \
+          --output json > deployment_response.json
+      - echo "Extracting upload URL and job ID..."
+      - >-
+        export UPLOAD_URL=$(python3 -c "import json; data=json.load(open('deployment_response.json')); print(data['zipUploadUrl'])")
+      - >-
+        export JOB_ID=$(python3 -c "import json; data=json.load(open('deployment_response.json')); print(data['jobId'])")
+      - echo "Uploading build.zip to Amplify..."
+      - curl -X PUT -T build.zip "$UPLOAD_URL"
+      - echo "Starting deployment..."
+      - >-
+        aws amplify start-deployment \
+          --app-id $AMPLIFY_APP_ID \
+          --branch-name main \
+          --job-id $JOB_ID
+      - echo "✅ Frontend deployment completed successfully!"
+
+artifacts:
+  files:
+    - build.zip
+  base-directory: frontend/out
