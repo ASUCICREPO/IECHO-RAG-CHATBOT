@@ -46,7 +46,16 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 │   ├── architectureDeepDive.md
 │   ├── deploymentGuide.md
 │   ├── userGuide.md
+│   ├── APIdoc.md
+│   ├── evaluationGuide.md
+│   ├── troubleshooting.md
 │   └── media/
+
+├── evaluation/
+│   ├── collect_model_dataset.py
+│   ├── model_evaluation_dataset.jsonl
+│   ├── requirements.txt
+│   └── venv/
 
 ├── frontend/
 │   ├── public/
@@ -72,7 +81,12 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
    - `docker/app/`: Python FastAPI application with multi-agent orchestration
    - `.env.example`: Template for backend environment variables
 2. **`docs/`**: Architecture, deployment, and user guides with media assets
-3. **`frontend/`**: Next.js web application with Amplify deployment
+3. **`evaluation/`**: Model evaluation and testing framework
+   - `collect_model_dataset.py`: Script to generate evaluation datasets from API responses
+   - `model_evaluation_dataset.jsonl`: Generated evaluation dataset for AWS Bedrock
+   - `requirements.txt`: Python dependencies for evaluation scripts
+   - `venv/`: Python virtual environment
+4. **`frontend/`**: Next.js web application with Amplify deployment
    - `pages/echo-knowledge-base.tsx`: Main chat interface component
    - `app/`: Next.js App Router configuration
    - `components/`: Reusable UI components
