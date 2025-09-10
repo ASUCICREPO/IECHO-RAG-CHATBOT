@@ -42,12 +42,11 @@ echo "  - Documents Bucket: $DOCUMENTS_BUCKET"
 
 ROLE_NAME="${PROJECT_NAME}-service-role"
 
-if [ "$ACTION" != "destroy" ]; then
-  echo "🔐 Setting up IAM role..."
-  
-  if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
-    echo "✓ IAM role exists: $ROLE_NAME"
-    ROLE_ARN=$(aws iam get-role --role-name "$ROLE_NAME" --query 'Role.Arn' --output text)
+echo "🔐 Setting up IAM role..."
+
+if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+  echo "✓ IAM role exists: $ROLE_NAME"
+  ROLE_ARN=$(aws iam get-role --role-name "$ROLE_NAME" --query 'Role.Arn' --output text)
   else
     echo "Creating IAM role: $ROLE_NAME"
     TRUST_DOC='{
@@ -385,15 +384,6 @@ if [ "$ACTION" != "destroy" ]; then
     echo "✅ IAM role created: $ROLE_ARN"
     echo "⏳ Waiting for IAM role to propagate..."
     sleep 10
-  fi
-else
-  # For destroy, get existing role ARN
-  if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
-    ROLE_ARN=$(aws iam get-role --role-name "$ROLE_NAME" --query 'Role.Arn' --output text)
-  else
-    echo "⚠️  IAM role $ROLE_NAME not found, using default"
-    ROLE_ARN="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/service-role/codebuild-service-role"
-  fi
 fi
 
 # --------------------------------------------------
