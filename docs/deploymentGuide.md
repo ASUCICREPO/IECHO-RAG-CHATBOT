@@ -173,6 +173,11 @@ The deployment script will prompt for these values (no need to create .env files
 - **GitHub Owner**: ASUCICREPO (hardcoded)
 - **GitHub Repo**: IECHO-RAG-CHATBOT (hardcoded)
 
+For local development, copy `backend/.env.example` to `backend/.env.local` and configure:
+- AWS_REGION, AWS_ACCOUNT_ID
+- KNOWLEDGE_BASE_ID, FEEDBACK_TABLE_NAME
+- LOG_GROUP (for CloudWatch logging)
+
 ### Frontend Environment Variables (Local Development)
 Copy `frontend/.env.example` to `frontend/.env.local`:
 ```bash
@@ -218,7 +223,7 @@ Monitor progress via:
 
 ### Build Process
 1. **deploy.sh** creates CodeBuild projects with specific IAM permissions
-2. **buildspec.yml** handles backend CDK deployment only
+2. **buildspec.yml** handles backend CDK deployment (FastAPI app in docker/app/)
 3. **buildspec-frontend.yml** handles frontend Amplify deployment only
 4. Both buildspecs are kept for monitoring/debugging purposes
 

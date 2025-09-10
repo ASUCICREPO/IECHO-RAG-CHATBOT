@@ -11,6 +11,7 @@ An intelligent multi-domain chatbot built with AWS Bedrock, Strands framework, a
 | [User Guide](#user-guide)                           | The working solution                                    |
 | [Directories](#directories)                         | General project directory structure                     |
 | [API Documentation](#api-documentation)             | Documentation on the API the project uses               |
+| [Evaluation](#evaluation)                           | Model evaluation and testing framework                  |
 | [Troubleshooting](#troubleshooting)                 | Common issues and solutions                             |
 | [Credits](#credits)                                 | Meet the team behind the solution                       |
 | [License](#license)                                 | License details                                         |
@@ -36,7 +37,8 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 │   ├── bin/
 │   ├── lib/
 │   ├── lambda/
-│   ├── src/
+│   ├── docker/
+│   │   └── app/
 │   ├── .env.example
 │   └── deploy.sh
 
@@ -53,8 +55,7 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 │   ├── components/
 │   ├── hooks/
 │   ├── lib/
-│   ├── .env.example
-│   └── .env.local
+│   └── .env.example
 
 ├── buildspec.yml
 ├── buildspec-frontend.yml
@@ -67,18 +68,17 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 1. **`backend/`**: AWS CDK app and backend code
    - `bin/`: CDK app entry point (stack instantiation)
    - `lib/`: CDK stacks and constructs (infrastructure as code)
-   - `lambda/`: Lambda functions for document processing
-   - `src/`: Python FastAPI application with multi-agent orchestration
+   - `lambda/office-to-pdf/`: Lambda function for document conversion (DOCX/XLSX/PPTX to PDF)
+   - `docker/app/`: Python FastAPI application with multi-agent orchestration
    - `.env.example`: Template for backend environment variables
 2. **`docs/`**: Architecture, deployment, and user guides with media assets
 3. **`frontend/`**: Next.js web application with Amplify deployment
-   - `pages/`: Main application pages (echo-knowledge-base.tsx)
+   - `pages/echo-knowledge-base.tsx`: Main chat interface component
    - `app/`: Next.js App Router configuration
    - `components/`: Reusable UI components
    - `hooks/`: Custom React hooks (use-chat, use-feedback)
    - `lib/`: Utility functions and configuration
    - `.env.example`: Template for frontend environment variables
-   - `.env.local`: Local development environment variables
 4. **Root**: Deployment scripts and build configurations
    - `deploy.sh`: Main deployment script (backend + frontend)
    - `cleanup.sh`: Complete resource cleanup script
@@ -88,6 +88,10 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 ## API Documentation
 
 Here you can learn about the API the project uses: [API Documentation](./docs/APIdoc.md).
+
+## Evaluation
+
+Model evaluation and testing framework can be found in the [Evaluation Guide](./docs/evaluationGuide.md).
 
 ## Troubleshooting
 

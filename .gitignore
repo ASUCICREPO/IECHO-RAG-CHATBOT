@@ -21,6 +21,9 @@ lambda-layers/*/python/
 .env.test.local
 .env.production.local
 
+# Allow example environment files
+!.env.example
+
 # Build outputs
 dist/
 build/

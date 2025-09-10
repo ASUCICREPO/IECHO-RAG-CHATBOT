@@ -36,7 +36,7 @@ The iECHO RAG Chatbot implements a sophisticated multi-domain conversational AI 
 
 ### Compute Layer
 - **EKS Fargate**: 
-  - **Multi-Agent FastAPI Application**: Python application using Strands framework for intelligent query routing
+  - **Multi-Agent FastAPI Application**: Python application in `docker/app/` using Strands framework for intelligent query routing
   - **Deployment**: 2 replicas with resource limits (500m CPU request, 1000m CPU limit, 512Mi memory request, 1Gi memory limit)
   - **Health Monitoring**: Liveness probes (30s initial delay, 10s period) and readiness probes (5s initial delay, 5s period)
   - **Image Support**: Integrated strands_tools.image_reader for processing uploaded images alongside text queries
@@ -55,7 +55,7 @@ The iECHO RAG Chatbot implements a sophisticated multi-domain conversational AI 
   - **Embedding Model**: Amazon Titan Text Embeddings G1 - Text for semantic search
   - **Chunking Strategy**: Hierarchial chunking for optimal document segmentation
   - **Data Source**: Connected to S3 documents bucket with automatic synchronization
-  - **LLM Integration**: Powers multi-agent reasoning using Amazon Nova Lite v1:0 model
+  - **LLM Integration**: Powers multi-agent reasoning using Amazon Nova Lite inference profile (us.amazon.nova-lite-v1:0)
   - **Multi-Domain Content**: Specialized knowledge for TB and Agriculture
 
 ### Storage Layer

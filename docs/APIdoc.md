@@ -12,7 +12,7 @@ The API uses a multi-agent architecture powered by the Strands framework for edu
 - **TB Specialist Agent**: Provides educational information about tuberculosis and health topics with knowledge base integration
 - **Agriculture Specialist Agent**: Offers educational content on farming, crops, irrigation, food safety, and water management
 - **Image Analysis**: Optional image processing via strands_tools.image_reader for visual content understanding
-- **Knowledge Base Integration**: AWS Bedrock Knowledge Base with Titan G1 Multimodal embeddings and hierarchical chunking
+- **Knowledge Base Integration**: AWS Bedrock Knowledge Base with Amazon Titan Text Embeddings G1 - Text and hierarchical chunking
 
 **Important**: This is an educational tool and should not be used for medical diagnosis or treatment decisions.
 
