@@ -402,6 +402,8 @@ if [ "$ACTION" != "destroy" ]; then
       --policy-document "$CUSTOM_POLICY"
 
     echo "✅ IAM role created: $ROLE_ARN"
+    echo "⏳ Waiting for IAM role to propagate..."
+    sleep 10
   fi
 else
   # For destroy, get existing role ARN
