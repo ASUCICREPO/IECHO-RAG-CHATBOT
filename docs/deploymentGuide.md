@@ -38,9 +38,7 @@ Before proceeding with manual setup, ensure your AWS user has the following cust
     {
       "Effect": "Allow",
       "Action": [
-        "bedrock:*",
-        "bedrock-agent:*",
-        "bedrock-agent-runtime:*"
+        "bedrock:*"
       ],
       "Resource": "*"
     },
