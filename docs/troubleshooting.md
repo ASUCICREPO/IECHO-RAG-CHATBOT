@@ -38,40 +38,53 @@ Error: User is not authorized to perform: codebuild:CreateProject
 ```
 
 **Solutions**:
-- Attach `PowerUserAccess` policy to your IAM user
-- Or add specific permissions from [Deployment Guide](./deploymentGuide.md)
-- Verify IAM user has `iam:CreateRole` permission
+- Add specific IAM permissions from [Deployment Guide](./deploymentGuide.md)
+- Ensure IAM user has `iam:CreateRole` and `iam:PutRolePolicy` permissions
+- Verify CodeBuild permissions are correctly set
 - Check AWS region matches your configuration
 
-#### 4. EKS Cluster Creation Timeout
+#### 4. IAM Role Creation Issues
 
-**Problem**: Deployment hangs during EKS cluster creation
+**Problem**: CodeBuild service role creation fails
 ```bash
-EKS cluster creation taking longer than expected...
+Error: CodeBuild is not authorized to perform: sts:AssumeRole
 ```
 
 **Solutions**:
-- **Normal behavior**: EKS clusters take 30-45 minutes to create
-- Monitor CloudWatch logs: `/aws/codebuild/your-project-name`
-- Check AWS Service Health Dashboard for EKS issues
-- Verify VPC limits haven't been exceeded
+- Wait 10 seconds after role creation (handled automatically in deploy.sh)
+- Verify IAM permissions for role creation
+- Check trust policy is correctly configured
+- Ensure role propagation has completed
 
-#### 5. Docker Build Failures
+#### 5. Frontend Build Failures
 
-**Problem**: Container image build fails in CodeBuild
+**Problem**: Frontend deployment fails in CodeBuild
 ```bash
-Error: docker build failed
+Error: YAML_FILE_ERROR or buildspec syntax issues
 ```
 
 **Solutions**:
-- Check buildspec.yml syntax
-- Verify Dockerfile exists in `backend/docker/`
-- Monitor CodeBuild logs for specific error details
-- Ensure sufficient CodeBuild compute resources
+- Check `buildspec-frontend.yml` syntax
+- Verify Amplify app was created without GitHub integration
+- Ensure environment variables are passed correctly
+- Check Next.js build process in logs
+
+#### 6. Amplify Deployment Issues
+
+**Problem**: Amplify deployment fails with zip upload errors
+```bash
+Error: Operation not supported. App is already connected a repository.
+```
+
+**Solutions**:
+- Ensure Amplify app is created without GitHub repository connection
+- Verify CDK creates Amplify app correctly (no repository/accessToken)
+- Check buildspec uses zip upload method, not GitHub integration
+- Confirm Amplify branch creation succeeds
 
 ### Runtime Issues
 
-#### 1. API Gateway 502/503 Errors
+#### 7. API Gateway 502/504 Errors
 
 **Problem**: API returns server errors
 ```bash
@@ -79,263 +92,181 @@ Error: docker build failed
 ```
 
 **Solutions**:
-- Check EKS pod status: `kubectl get pods`
-- Verify ALB health checks are passing
+- Check EKS pod status: `kubectl get pods -n default`
+- Verify ALB target group health in AWS Console
 - Check application logs in CloudWatch
-- Ensure Knowledge Base is accessible
-- Verify IAM roles have correct permissions
+- Ensure Knowledge Base is accessible from EKS
 
-#### 2. Slow Response Times
+#### 8. Knowledge Base Connection Issues
 
-**Problem**: Responses take longer than 25 seconds
+**Problem**: Chat responses indicate KB connection problems
 ```bash
-Request timeout after 25 seconds
+Error: Unable to retrieve from knowledge base
 ```
 
 **Solutions**:
-- **Normal range**: 3-7 seconds for most queries
-- Complex queries may take longer
-- Check Knowledge Base performance
-- Monitor EKS pod resource usage
-- Verify network connectivity to Bedrock
-
-#### 3. Knowledge Base Access Errors
-
-**Problem**: "Knowledge base access denied" errors
-```bash
-Error: Unable to access knowledge base
-```
-
-**Solutions**:
-- Verify EKS service account IAM role permissions
-- Check Bedrock service availability
+- Verify Knowledge Base ID in environment variables
+- Check IAM role permissions for Bedrock access
 - Ensure Knowledge Base data source is synced
-- Verify S3 bucket permissions for vector store
+- Test Knowledge Base directly in Bedrock Console
 
-#### 4. Image Upload Failures
+#### 9. Frontend API Connection Issues
 
-**Problem**: Image uploads fail or timeout
+**Problem**: Frontend can't connect to backend API
 ```bash
-Error: Image processing failed
+Network Error or CORS issues
 ```
 
 **Solutions**:
-- Check image size (max 10MB)
-- Verify supported formats: JPG, PNG, GIF, WebP
-- Ensure strands_tools.image_reader is available
-- Check temporary file system permissions
-
-#### 5. Session Management Issues
-
-**Problem**: Conversation context lost unexpectedly
-```bash
-Session expired or not found
-```
-
-**Solutions**:
-- **Normal behavior**: Sessions expire after 1 hour
-- Check session ID consistency in requests
-- Verify in-memory session store is functioning
-- Monitor application memory usage
-
-### Frontend Issues
-
-#### 1. Amplify Build Failures
-
-**Problem**: Frontend deployment fails
-```bash
-Amplify build failed with exit code 1
-```
-
-**Solutions**:
-- Check GitHub repository access
-- Verify branch name is `main`
-- Review Amplify build logs in AWS Console
-- Ensure package.json dependencies are correct
-
-#### 2. CORS Errors
-
-**Problem**: Browser blocks API requests
-```bash
-CORS policy: No 'Access-Control-Allow-Origin' header
-```
-
-**Solutions**:
-- Verify API Gateway CORS configuration
-- Check ALB and EKS service CORS settings
-- Ensure frontend uses correct API Gateway URL
-- Clear browser cache and cookies
-
-#### 3. Real-time Streaming Issues
-
-**Problem**: Streaming responses don't work
-```bash
-EventSource connection failed
-```
-
-**Solutions**:
-- Verify `/chat-stream` endpoint accessibility
-- Check browser EventSource support
-- Monitor network connectivity
-- Ensure API Gateway timeout settings
-
-### Performance Issues
-
-#### 1. High Memory Usage
-
-**Problem**: EKS pods consuming excessive memory
-```bash
-Pod memory usage above 1Gi limit
-```
-
-**Solutions**:
-- Monitor conversation session cleanup
-- Check for memory leaks in application logs
-- Verify garbage collection is working
-- Consider increasing pod memory limits
-
-#### 2. Database Connection Issues
-
-**Problem**: DynamoDB feedback storage fails
-```bash
-Error: Unable to write to feedback table
-```
-
-**Solutions**:
-- Verify DynamoDB table exists and is active
-- Check IAM permissions for DynamoDB access
-- Monitor DynamoDB throttling metrics
-- Ensure table has correct TTL configuration
-
-#### 3. Load Balancer Health Check Failures
-
-**Problem**: ALB marks pods as unhealthy
-```bash
-Health check failed: /health endpoint timeout
-```
-
-**Solutions**:
-- Verify `/health` endpoint responds quickly
-- Check pod startup time and readiness probes
-- Monitor EKS pod resource constraints
-- Ensure application is binding to port 8000
-
-### Monitoring and Debugging
-
-#### CloudWatch Logs Access
-
-**Application Logs**:
-```bash
-aws logs tail /aws/eks/your-cluster-name/agent-service --follow
-```
-
-**EKS Cluster Logs**:
-```bash
-aws logs tail /aws/eks/your-cluster-name/cluster --follow
-```
-
-**CodeBuild Logs**:
-```bash
-aws logs tail /aws/codebuild/your-project-name --follow
-```
-
-#### Kubernetes Debugging
-
-**Check Pod Status**:
-```bash
-kubectl get pods -n default
-kubectl describe pod <pod-name>
-```
-
-**View Pod Logs**:
-```bash
-kubectl logs <pod-name> -f
-```
-
-**Check Service Status**:
-```bash
-kubectl get svc
-kubectl describe svc agent-service
-```
-
-#### Health Check Commands
-
-**API Health**:
-```bash
-curl https://your-api-gateway-url/health
-```
-
-**Test Chat Endpoint**:
-```bash
-curl -X POST https://your-api-gateway-url/chat \
-  -H "Content-Type: application/json" \
-  -d '{"query": "test", "userId": "debug"}'
-```
+- Verify `NEXT_PUBLIC_API_BASE_URL` in `.env.local`
+- Check API Gateway CORS configuration
+- Ensure API Gateway URL is correct and accessible
+- Test API endpoints directly with curl
 
 ### Cleanup Issues
 
-#### 1. Stuck Resources During Destroy
+#### 10. CloudFormation Stack Deletion Failures
 
-**Problem**: `cdk destroy` fails with dependency errors
+**Problem**: Stack deletion fails due to resource dependencies
 ```bash
-Error: Cannot delete VPC - dependencies exist
+Error: Resource has a dependent object
 ```
 
 **Solutions**:
-- Use deploy.sh destroy mode (handles cleanup automatically)
-- Manually delete ALB and security groups if needed
-- Wait for EKS cluster deletion to complete (45-60 minutes)
-- Check for remaining ENIs and security groups
+- Run `./cleanup.sh` which handles dependencies automatically
+- Script will clean security groups and retry CDK destroy
+- Check for manual resources that need deletion
+- Verify EKS cluster deletion completes
 
-#### 2. Kubernetes Security Groups
+#### 11. Security Group Dependency Issues
 
-**Problem**: Security groups prevent CDK destruction
+**Problem**: VPC deletion fails due to security group references
 ```bash
-Error: Cannot delete security group - in use
+Error: DependencyViolation - resource has a dependent object
 ```
 
 **Solutions**:
-- Deploy script handles this automatically
-- Manual cleanup: Delete k8s-* security groups first
-- Wait 10 minutes between cleanup attempts
-- Use AWS Console to identify dependent resources
+- Cleanup script handles this automatically with retry logic
+- First attempts CDK destroy, then cleans security groups if needed
+- Waits for network interface cleanup before retrying
+- Manual cleanup: remove security group rules in AWS Console
 
-### Getting Additional Help
+#### 12. EKS Cluster Stuck in Deleting State
 
-#### Log Analysis
+**Problem**: EKS cluster deletion takes very long or gets stuck
+```bash
+Cluster status: DELETING for extended period
+```
 
-1. **Enable Debug Logging**: Set log level to DEBUG in application
-2. **Collect Relevant Logs**: Gather logs from the time of issue
-3. **Check Error Patterns**: Look for recurring error messages
-4. **Monitor Resource Usage**: Check CPU, memory, and network metrics
+**Solutions**:
+- EKS deletion can take 30-45 minutes - this is normal
+- Check for stuck Fargate profiles or node groups
+- Verify no manual resources are preventing deletion
+- CDK handles proper deletion order automatically
 
-#### Support Information
+## Debugging Steps
 
-When reporting issues, include:
-- Deployment timestamp and region
-- Error messages and stack traces
-- CloudWatch log excerpts
-- Steps to reproduce the issue
-- Expected vs actual behavior
+### 1. Check Deployment Logs
 
-#### Useful AWS Console Links
+**CodeBuild Logs**:
+```bash
+# Backend deployment logs
+aws logs tail /aws/codebuild/iecho-rag-[timestamp]-main --follow
 
-- **EKS Clusters**: AWS Console → EKS → Clusters
-- **CloudWatch Logs**: AWS Console → CloudWatch → Log Groups
-- **Bedrock Knowledge Bases**: AWS Console → Bedrock → Knowledge Bases
-- **API Gateway**: AWS Console → API Gateway → APIs
-- **DynamoDB Tables**: AWS Console → DynamoDB → Tables
+# Frontend deployment logs
+aws logs tail /aws/codebuild/iecho-rag-[timestamp]-frontend --follow
+```
 
-#### Emergency Procedures
+**Application Logs**:
+```bash
+# EKS application logs
+aws logs tail /aws/containerinsights/[cluster-name]/application --follow
 
-**Complete System Reset**:
-1. Run deploy.sh in destroy mode
-2. Wait for complete cleanup (up to 1.5 hours)
-3. Verify all resources are deleted
-4. Re-run deployment from Step 1
+# API Gateway logs
+aws logs tail API-Gateway-Execution-Logs_[api-id]/prod --follow
+```
 
-**Partial Recovery**:
-1. Identify failing component from logs
-2. Update specific configuration
-3. Redeploy only affected components
-4. Test functionality incrementally
+### 2. Verify Infrastructure Status
+
+**CloudFormation Stack**:
+```bash
+aws cloudformation describe-stacks --stack-name AgentFargateStack
+aws cloudformation describe-stack-events --stack-name AgentFargateStack
+```
+
+**EKS Cluster**:
+```bash
+aws eks describe-cluster --name [cluster-name]
+kubectl get pods -n default
+kubectl get services -n default
+```
+
+**Amplify App**:
+```bash
+aws amplify list-apps
+aws amplify get-app --app-id [app-id]
+```
+
+### 3. Test Individual Components
+
+**API Gateway**:
+```bash
+curl https://[api-gateway-url]/health
+curl -X POST https://[api-gateway-url]/chat \
+  -H "Content-Type: application/json" \
+  -d '{"query": "test", "userId": "test", "sessionId": "test"}'
+```
+
+**Knowledge Base**:
+- Test directly in AWS Bedrock Console
+- Verify data source sync status
+- Check embeddings model configuration
+
+**Frontend**:
+- Test locally with `npm run dev`
+- Check browser console for errors
+- Verify API URL configuration
+
+## Performance Issues
+
+### 1. Slow Response Times
+
+**Problem**: API responses are slow (>10 seconds)
+
+**Solutions**:
+- Check EKS pod resource allocation
+- Verify Knowledge Base performance in Bedrock Console
+- Monitor CloudWatch metrics for bottlenecks
+- Consider scaling EKS Fargate resources
+
+### 2. High Memory Usage
+
+**Problem**: Application pods restarting due to memory issues
+
+**Solutions**:
+- Check pod memory limits in Kubernetes deployment
+- Monitor memory usage in CloudWatch Container Insights
+- Adjust Fargate profile resource allocation if needed
+- Review application memory optimization
+
+## Getting Additional Help
+
+### Log Locations
+- **CodeBuild**: `/aws/codebuild/[project-name]`
+- **EKS Cluster**: `/aws/eks/[cluster-name]/cluster`
+- **Application**: `/aws/containerinsights/[cluster-name]/application`
+- **Lambda**: `/aws/lambda/[function-name]`
+- **API Gateway**: `API-Gateway-Execution-Logs_[api-id]/prod`
+
+### AWS Console Resources
+- **CloudFormation**: Monitor stack events and resources
+- **EKS**: Check cluster, node groups, and Fargate profiles
+- **CodeBuild**: Review build history and logs
+- **Amplify**: Monitor app deployments and builds
+- **CloudWatch**: View all logs and metrics
+
+### Support Channels
+- Check AWS service health dashboard
+- Review AWS documentation for specific services
+- Use AWS Support if you have a support plan
+- Check GitHub repository for known issues

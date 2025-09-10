@@ -1,9 +1,13 @@
 # Architecture Deep Dive
 
-## Architecture
+## Architecture Overview
 ![Architecture Diagram](./media/architecture.png)
 
-1. **User Query**: User submits questions and optional images through the React web interface hosted on AWS Amplify.
+The iECHO RAG Chatbot implements a sophisticated multi-domain conversational AI system using AWS cloud services. Does intelligent query routing, vector-based knowledge retrieval, and real-time response streaming.
+
+## Request Flow
+
+1. **User Query**: User submits questions and optional images through the Next.js web interface hosted on AWS Amplify.
 2. **API Gateway**: Routes requests to the backend API with CORS support and security controls.
 3. **Load Balancer**: AWS Application Load Balancer distributes traffic across EKS Fargate pods.
 4. **Multi-Agent Orchestrator**: Strands framework analyzes queries and routes to appropriate specialist agents (TB, Agriculture, General).
@@ -17,44 +21,132 @@
 
 ## AWS Cloud Services
 
-- **API Gateway**: Acts as the front door for all chat requests, handles CORS and routing to the EKS cluster.
+### Frontend Layer
+- **AWS Amplify**: 
+  - Hosts Next.js web application with static site generation
+  - Manual deployment via zip upload (no GitHub integration)
+  - Automatic HTTPS and CDN distribution
+  - Environment variable management for API endpoints
+
+### API Layer
+- **API Gateway**: 
+  - REST API with CORS configuration
+  - Routes all requests to Application Load Balancer
+  - Request/response logging to CloudWatch
+
+### Compute Layer
 - **EKS Fargate**: 
   - **Multi-Agent FastAPI Application**: Python application using Strands framework for intelligent query routing
   - **Deployment**: 2 replicas with resource limits (500m CPU request, 1000m CPU limit, 512Mi memory request, 1Gi memory limit)
   - **Health Monitoring**: Liveness probes (30s initial delay, 10s period) and readiness probes (5s initial delay, 5s period)
   - **Image Support**: Integrated strands_tools.image_reader for processing uploaded images alongside text queries
-- **Application Load Balancer**: Distributes incoming requests across EKS pods with health checks on `/health` endpoint.
+  - **Kubernetes Version**: v1.32 with Fargate profiles for serverless container execution
+  - **Networking**: Private subnets with NAT Gateway for outbound internet access
+
+- **Application Load Balancer**: 
+  - Distributes incoming requests across EKS pods
+  - Health checks on `/health` endpoint
+  - Integration with AWS Load Balancer Controller v1.8.0
+  - Target group configuration for Fargate services
+
+### AI Layer
 - **AWS Bedrock Knowledge Base**: 
-  - **Vector Store Type**: Amazon S3-backed vector database for semantic search
-  - **Embedding Model**: Amazon Titan Text Embeddings G1 - Multimodal for text and image processing
-  - **Chunking Strategy**: Hierarchical chunking for optimal document segmentation and retrieval
-  - **Data Source**: Connected to S3 documents bucket with automatic data synchronization
-  - **Vector Index**: Stored in dedicated S3 vector store bucket for fast similarity search
-  - **LLM Integration**: Powers the multi-agent reasoning and response generation using Nova Lite v1:0 model
+  - **Vector Store Type**: S3 vector store
+  - **Embedding Model**: Amazon Titan Text Embeddings G1 - Text for semantic search
+  - **Chunking Strategy**: Hierarchial chunking for optimal document segmentation
+  - **Data Source**: Connected to S3 documents bucket with automatic synchronization
+  - **LLM Integration**: Powers multi-agent reasoning using Amazon Nova Lite v1:0 model
+  - **Multi-Domain Content**: Specialized knowledge for TB and Agriculture
+
+### Storage Layer
 - **S3 Storage**: 
-  - **Documents Bucket**: Stores processed documents (PDF, DOCX, XLSX, PPTX) for Knowledge Base ingestion
-  - **Vector Store Bucket**: Houses the vector index with embeddings for semantic search operations
-  - **Data Automation**: Automatic synchronization between document uploads and Knowledge Base updates
-- **DynamoDB**: Pay-per-request NoSQL database storing user feedback with TTL for automatic cleanup.
-- **CloudWatch**: 
-  - **Application Logs**: `/aws/eks/{cluster-name}/agent-service` with infinite retention
-  - **Fargate Logs**: `/aws/eks/{cluster-name}/fargate` for container-level logging
-  - **EKS Cluster Logs**: API, Audit, Authenticator, Controller Manager, and Scheduler logging enabled
-- **Amplify Hosting**: Hosts the React frontend application with GitHub integration for CI/CD.
+  - **Documents Bucket**: Stores processed documents (PDF, DOCX, TXT, MD) for Knowledge Base ingestion
+  - **Vector Store Bucket**: Houses vector index
+
+- **DynamoDB**: 
+  - Pay-per-request NoSQL database for user feedback storage
+
+### Processing Layer
 - **Lambda Functions** (Optional):
-  - **office-to-pdf**: Converts DOCX, XLSX, PPTX files to PDF format for Knowledge Base processing
-- **VPC Endpoints**: Gateway endpoints for S3 and DynamoDB, interface endpoints for ECR, CloudWatch, Bedrock, STS, EKS, EC2, and Lambda for cost optimization and security.
+  - **office-to-pdf**: Converts DOCX, XLSX, PPTX files to PDF format
+  - **Event-driven**: Triggered by S3 uploads for automatic document processing
+  - **Runtime**: Python 3.12 with LibreOffice for document conversion
 
-## AWS CDK and Deployment Information
+### Monitoring & Logging
+- **CloudWatch**: 
+  - **Application Logs**: `/aws/containerinsights/{cluster-name}/application` with infinite retention
+  - **EKS Cluster Logs**: API, Audit, Authenticator, Controller Manager, and Scheduler logging
+  - **CodeBuild Logs**: `/aws/codebuild/{project-name}` for deployment monitoring
+  - **Lambda Logs**: `/aws/lambda/{function-name}` for document processing
+  - **API Gateway Logs**: `API-Gateway-Execution-Logs_{api-id}/prod` for request tracking
 
-- **AWS CDK** is used to build the entire infrastructure stack, including EKS Fargate cluster, VPC with 2 AZs and 1 NAT Gateway, API Gateway, DynamoDB, and all required IAM roles and policies. The stack is defined in TypeScript using CDK8s for Kubernetes manifests.
-- The **deploy.sh** script automates the deployment process through AWS CodeBuild, which:
-  - Creates a CodeBuild project with administrator access service role
-  - Stores GitHub access tokens securely in AWS Secrets Manager
-  - Builds and deploys the CDK stack with context parameters (Knowledge Base ID, GitHub details, optional documents bucket)
-  - Triggers Amplify frontend deployment automatically
-- **CodeBuild Integration**: The buildspec.yml defines the build process that installs Node.js 20, CDK CLI, compiles TypeScript, bootstraps CDK, and deploys infrastructure. It also supports destroy mode with automatic Kubernetes security group cleanup.
-- **GitHub Integration**: Amplify automatically builds and deploys the frontend when changes are pushed to the `main` branch.
-- **Fargate Profile**: Configured for the `default` namespace with `app: agent-service` selector, running on private subnets with egress.
-- **Docker Image**: Application containerized with Python 3.12, FastAPI, and Strands framework, built and pushed to ECR during deployment.
-- **Knowledge Base Setup**: Requires manual creation of Bedrock Knowledge Base with S3 vector store configuration and data source synchronization before deployment.
+### Networking & Security
+- **VPC Configuration**:
+  - **Multi-AZ**: 2 Availability Zones for high availability
+  - **Subnets**: Public subnets for ALB, private subnets for EKS
+  - **NAT Gateway**: Single NAT Gateway for cost optimization
+  - **Internet Gateway**: For public subnet internet access
+
+- **Security Groups**:
+  - **ALB Security Group**: HTTP/HTTPS inbound from internet
+  - **EKS Security Group**: HTTP inbound from ALB only
+  - **VPC Endpoints Security Group**: HTTPS for AWS service communication
+
+- **IAM Roles & Policies**:
+  - **EKS Cluster Role**: Manages EKS cluster operations
+  - **Fargate Profile Role**: Executes pods on Fargate
+  - **Application Role**: Accesses Bedrock, DynamoDB, and CloudWatch
+  - **CodeBuild Role**: Least-privilege permissions for deployment
+  - **Amplify Role**: Frontend deployment and hosting
+
+- **VPC Endpoints**:
+  - **Gateway Endpoints**: S3 and DynamoDB for cost optimization
+  - **Interface Endpoints**: ECR, CloudWatch, Bedrock, STS, EKS, EC2, Lambda for secure communication
+
+## Deployment Architecture
+
+### Infrastructure as Code
+- **AWS CDK**: TypeScript-based infrastructure definition
+- **CDK8s**: Kubernetes manifests generated from CDK
+- **Stack Management**: Single CloudFormation stack (AgentFargateStack)
+- **Resource Tagging**: Consistent tagging for cost allocation and management
+
+### CI/CD Pipeline
+- **CodeBuild Projects**:
+  - **Backend**: `buildspec.yml` for CDK deployment
+  - **Frontend**: `buildspec-frontend.yml` for Amplify deployment
+  - **IAM Roles**: Least-privilege permissions for each build process
+  - **Artifact Storage**: Temporary S3 buckets for source code
+
+- **Deployment Process**:
+  1. **Source Packaging**: Create zip archive of source code
+  2. **Backend Deployment**: CDK synthesize and deploy infrastructure
+  3. **Frontend Deployment**: Next.js build and Amplify zip upload
+  4. **Verification**: Health checks and smoke tests
+  5. **Cleanup**: Remove temporary resources
+
+### Security Best Practices
+- **Least Privilege Access**: IAM roles with minimal required permissions
+- **Network Isolation**: Private subnets for compute resources
+- **Encryption**: At-rest and in-transit encryption for all data
+- **Secrets Management**: Environment variables for sensitive configuration
+- **Resource Isolation**: Dedicated VPC with controlled access
+
+### Monitoring & Observability
+- **CloudWatch Metrics**: Custom metrics for application performance
+- **Log Aggregation**: Centralized logging across all services
+- **Health Checks**: Comprehensive health monitoring at all layers
+- **Alerting**: CloudWatch alarms for critical system events
+
+## Cost Optimization
+
+### Resource Efficiency
+- **Fargate**: Pay-per-use compute without managing servers
+- **DynamoDB**: Pay-per-request pricing for variable usage
+- **VPC Endpoints**: Reduce NAT Gateway data transfer costs
+
+### Operational Efficiency
+- **Managed Services**: Reduce operational overhead with AWS managed services
+- **Automated Deployment**: Reduce manual deployment time and errors
+- **Infrastructure as Code**: Version-controlled, repeatable deployments
+- **Monitoring**: Proactive issue detection and resolution
