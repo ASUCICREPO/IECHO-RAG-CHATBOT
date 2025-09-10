@@ -36,6 +36,6 @@ phases:
       - AMPLIFY_APP_ID=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs[?OutputKey==`ExportAmplifyAppId`].OutputValue' --output text 2>/dev/null)
       - echo "   🌐 API Gateway:" $API_URL
       - echo "   📱 Amplify App ID:" $AMPLIFY_APP_ID
-      - echo "   🔗 Frontend URL: https://main."$AMPLIFY_URL
+      - echo "   🔗 Frontend URL:" https://main.$AMPLIFY_URL
       - echo ""
       - echo "✅ Backend ready! Frontend deployment will follow..."
