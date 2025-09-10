@@ -13,6 +13,164 @@
 - **Deployment**: Up to 1 hour for complete infrastructure setup
 - **Cleanup**: Up to 1 hour 30 minutes for complete resource removal
 
+## IAM Policy Requirements
+
+Before proceeding with manual setup, ensure your AWS user has the following custom policy attached:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3vectors:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:*",
+        "bedrock-agent:*",
+        "bedrock-agent-runtime:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "eks:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codebuild:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:*",
+        "cloudwatch:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "apigateway:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lambda:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "amplify:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sts:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+## Pre-Deployment Checks
+
+### 1. Region Configuration
+**Important**: This solution must be deployed in **us-west-2** region.
+
+- **AWS Console**: Ensure you're logged into **us-west-2** region (check top-right corner)
+- **AWS CLI**: Verify your default region is set to us-west-2:
+  ```bash
+  aws configure get region
+  ```
+  If not set to us-west-2, configure it:
+  ```bash
+  aws configure set region us-west-2
+  ```
+
+### 2. Bedrock Model Access
+Verify you have access to required Bedrock models:
+```bash
+# Check Nova Lite model access
+aws bedrock list-foundation-models --region us-west-2 --query 'modelSummaries[?contains(modelId, `nova-lite`)]'
+
+# Check Titan Embeddings model access  
+aws bedrock list-foundation-models --region us-west-2 --query 'modelSummaries[?contains(modelId, `titan-embed`)]'
+```
+
+If models are not available, request access in AWS Console:
+1. Go to **Amazon Bedrock** → **Model access**
+2. Request access for:
+   - **Amazon Nova Lite** (for chat responses)
+   - **Amazon Titan Embeddings G1 - Text** (for knowledge base)
+
 ## Step-by-Step Prerequisites Setup (Manual Setup)
 First, log in to AWS Console
 
@@ -109,114 +267,18 @@ Note both bucket names (vector bucket and general purpose bucket) for next steps
 4. Clone your repository and proceed with deployment
 
 ### Option 2: Local Machine
-Requires AWS CLI installed and configured with `aws configure`
+1. Install AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+2. Configure AWS CLI with your credentials:
+   ```bash
+   aws configure
+   ```
+   Enter:
+   - AWS Access Key ID
+   - AWS Secret Access Key  
+   - Default region (e.g., us-west-2)
+   - Default output format (json)
 
-## Required AWS Permissions
 
-### For AWS CLI User (aws configure) or CloudShell User
-Your AWS IAM user needs these specific permissions to run the deployment:
-
-**IAM Permissions** (for creating CodeBuild service role):
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "iam:CreateRole",
-        "iam:AttachRolePolicy",
-        "iam:GetRole",
-        "iam:PassRole",
-        "iam:PutRolePolicy",
-        "iam:DeleteRole",
-        "iam:DeleteRolePolicy"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-**CodeBuild Permissions**:
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "codebuild:CreateProject",
-        "codebuild:StartBuild",
-        "codebuild:BatchGetBuilds",
-        "codebuild:DeleteProject",
-        "codebuild:ListProjects"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-**S3 Permissions** (for source code storage):
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:CreateBucket",
-        "s3:DeleteBucket",
-        "s3:PutObject",
-        "s3:GetObject",
-        "s3:DeleteObject",
-        "s3:ListBucket"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-**CloudFormation Permissions**:
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "cloudformation:DescribeStacks",
-        "cloudformation:DescribeStackResources",
-        "cloudformation:DescribeStackEvents"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-## Environment Variables
-
-### Backend Environment Variables
-The deployment script will prompt for these values (no need to create .env files manually):
-- **Knowledge Base ID**: Your Bedrock Knowledge Base ID
-- **Documents Bucket**: S3 bucket name for document storage
-- **GitHub Owner**: ASUCICREPO (hardcoded)
-- **GitHub Repo**: IECHO-RAG-CHATBOT (hardcoded)
-
-For local development, copy `backend/.env.example` to `backend/.env.local` and configure:
-- AWS_REGION, AWS_ACCOUNT_ID
-- KNOWLEDGE_BASE_ID, FEEDBACK_TABLE_NAME
-- LOG_GROUP (for CloudWatch logging)
-
-### Frontend Environment Variables (Local Development)
-Copy `frontend/.env.example` to `frontend/.env.local`:
-```bash
-# API Base URL - The backend API Gateway URL (obtained after deployment)
-NEXT_PUBLIC_API_BASE_URL=https://your-api-gateway-url.execute-api.region.amazonaws.com/prod/
-```
 
 ## Deployment Steps
 
@@ -241,12 +303,12 @@ The script will prompt you for:
 - **Knowledge Base ID**: Your Bedrock Knowledge Base ID (format: XXXXXXXXXX)
 - **Documents Bucket**: S3 bucket name for document storage
 
-### 4. Monitor Deployment
 The deployment process includes:
 1. **IAM Role Creation**: Creates CodeBuild service role with least-privilege permissions
 2. **Backend Deployment**: Deploys CDK infrastructure via CodeBuild (buildspec.yml)
 3. **Frontend Deployment**: Builds and deploys Next.js app to Amplify (buildspec-frontend.yml)
 
+### 4. Monitor Deployment
 Monitor progress via:
 - Console output with build URLs
 - AWS CodeBuild console
@@ -260,11 +322,6 @@ Monitor progress via:
 3. **buildspec-frontend.yml** handles frontend Amplify deployment only
 4. Both buildspecs are kept for monitoring/debugging purposes
 
-### Security
-- **Least Privilege IAM**: Custom IAM policy with only required permissions (no PowerUserAccess)
-- **Service-Specific Permissions**: Each AWS service gets only necessary actions
-- **Temporary Resources**: S3 buckets cleaned up after deployment
-
 ## Post-Deployment
 
 ### Accessing Your Application
@@ -276,7 +333,6 @@ After successful deployment, you'll receive:
 ### Testing
 1. **Frontend**: Access the Amplify URL to test the web interface
 2. **API**: Test API endpoints using the Gateway URL
-3. **Local Development**: Use `.env.local` with API Gateway URL for local frontend development
 
 ## Cleanup
 
@@ -306,39 +362,6 @@ If automated cleanup fails:
 3. Check EKS cluster deletion status
 4. Verify VPC resources are properly removed
 
-## Troubleshooting
-
-### Common Issues
-
-**CodeBuild Role Issues**:
-- Ensure IAM permissions are correctly set
-- Wait 10 seconds after role creation for propagation (handled automatically)
-
-**Frontend Build Failures**:
-- Check buildspec-frontend.yml syntax
-- Verify Amplify app creation succeeded (no GitHub integration)
-- Check environment variables are passed correctly
-
-**CDK Deployment Failures**:
-- Verify Knowledge Base ID exists and is accessible
-- Check S3 bucket permissions and existence
-- Ensure EKS service limits aren't exceeded
-
-**Cleanup Issues**:
-- Security groups may have dependencies - script handles this automatically with retry logic
-- EKS resources may take time to delete - CDK handles proper ordering
-- Check CloudFormation events for specific failure reasons
-
-**YAML Syntax Errors**:
-- Buildspec files use specific YAML syntax
-- Multi-line commands use proper formatting
-- Environment variables are correctly passed
-
-### Getting Help
-- Check AWS CloudFormation events for detailed error messages
-- Review CodeBuild logs via the provided console URLs
-- Verify all prerequisites are met before deployment
-- Ensure Knowledge Base ID and Documents Bucket exist and are accessible
 
 ### Accessing Logs for Troubleshooting
 
@@ -353,21 +376,28 @@ aws logs tail /aws/codebuild/iecho-rag-[timestamp]-frontend --follow
 
 **Application Logs** (after deployment):
 ```bash
-# EKS application logs
-aws logs tail /aws/containerinsights/[cluster-name]/application --follow
+# Agent application logs (main application)
+aws logs tail /aws/eks/[cluster-name]/agent-service --follow
+
+# EKS Fargate logs
+aws logs tail /aws/eks/[cluster-name]/fargate --follow
+
+# EKS cluster logs
+aws logs tail /aws/eks/[cluster-name]/cluster --follow
 
 # API Gateway logs
 aws logs tail API-Gateway-Execution-Logs_[api-id]/prod --follow
 
-# Lambda function logs (office-to-PDF)
-aws logs tail /aws/lambda/AgentFargateStack-OfficeToPDF --follow
+# Lambda function logs (office-to-PDF conversion)
+aws logs tail /aws/lambda/office-to-pdf-AgentFargateStack --follow
 ```
 
 **CloudWatch Log Groups**:
 - `/aws/codebuild/[project-name]` - Build and deployment logs
-- `/aws/eks/[cluster-name]/cluster` - EKS cluster logs  
-- `/aws/containerinsights/[cluster-name]/application` - Application container logs
-- `/aws/lambda/[function-name]` - Lambda function logs
+- `/aws/eks/[cluster-name]/agent-service` - Agent application logs
+- `/aws/eks/[cluster-name]/fargate` - Fargate container logs
+- `/aws/eks/[cluster-name]/cluster` - EKS cluster control plane logs
+- `/aws/lambda/office-to-pdf-AgentFargateStack` - Lambda function logs
 - `API-Gateway-Execution-Logs_[api-id]/prod` - API Gateway execution logs
 
 **Viewing Logs in AWS Console**:
@@ -376,7 +406,7 @@ aws logs tail /aws/lambda/AgentFargateStack-OfficeToPDF --follow
 3. Click on the log group to view log streams
 4. Select the most recent log stream for current logs
 
-## Infrastructure Components Deployed
+## Infrastructure Components Deployed by script
 
 - **EKS Fargate Cluster**: Kubernetes cluster with Fargate profiles
 - **VPC**: Multi-AZ setup with public/private subnets and NAT Gateway
