@@ -71,6 +71,12 @@ if aws cloudformation describe-stacks --stack-name "$STACK_NAME" >/dev/null 2>&1
   echo "Attempting CDK destroy..."
   cd backend
   
+  # Install dependencies first
+  if [ ! -d "node_modules" ]; then
+    echo "Installing CDK dependencies..."
+    npm install >/dev/null 2>&1
+  fi
+  
   if cdk destroy --force 2>/dev/null; then
     echo "✅ CDK destroy completed successfully"
   else
