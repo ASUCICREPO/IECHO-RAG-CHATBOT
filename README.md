@@ -37,6 +37,7 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 │   ├── lib/
 │   ├── lambda/
 │   ├── src/
+│   ├── .env.example
 │   └── deploy.sh
 
 ├── docs/
@@ -47,28 +48,42 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 
 ├── frontend/
 │   ├── public/
-│   └── src/
-│       ├── components/
-│       ├── pages/
-│       ├── services/
-│       └── utils/
+│   ├── pages/
+│   ├── app/
+│   ├── components/
+│   ├── hooks/
+│   ├── lib/
+│   ├── .env.example
+│   └── .env.local
 
 ├── buildspec.yml
+├── buildspec-frontend.yml
+├── deploy.sh
+├── cleanup.sh
 ├── LICENSE
 └── README.md
 ```
 
-1. `backend/`: AWS CDK app and backend code
+1. **`backend/`**: AWS CDK app and backend code
    - `bin/`: CDK app entry point (stack instantiation)
    - `lib/`: CDK stacks and constructs (infrastructure as code)
    - `lambda/`: Lambda functions for document processing
    - `src/`: Python FastAPI application with multi-agent orchestration
-   - `deploy.sh`: Automated deployment script with CodeBuild integration
-2. `docs/`: Architecture, deployment, and user guides with media assets
-3. `frontend/`: React web application with Amplify deployment
-   - `src/components`, `pages`, `services`, `utils`: App code and assets
-   - `public/`: Static assets served by the app
-4. Root: Build configuration, license and readme (`buildspec.yml`, `LICENSE`, `README.md`)
+   - `.env.example`: Template for backend environment variables
+2. **`docs/`**: Architecture, deployment, and user guides with media assets
+3. **`frontend/`**: Next.js web application with Amplify deployment
+   - `pages/`: Main application pages (echo-knowledge-base.tsx)
+   - `app/`: Next.js App Router configuration
+   - `components/`: Reusable UI components
+   - `hooks/`: Custom React hooks (use-chat, use-feedback)
+   - `lib/`: Utility functions and configuration
+   - `.env.example`: Template for frontend environment variables
+   - `.env.local`: Local development environment variables
+4. **Root**: Deployment scripts and build configurations
+   - `deploy.sh`: Main deployment script (backend + frontend)
+   - `cleanup.sh`: Complete resource cleanup script
+   - `buildspec.yml`: Backend deployment buildspec
+   - `buildspec-frontend.yml`: Frontend deployment buildspec
 
 ## API Documentation
 

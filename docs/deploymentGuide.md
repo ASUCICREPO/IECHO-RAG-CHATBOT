@@ -3,14 +3,69 @@
 ## Prerequisites
 
 - AWS CLI access (local installation with `aws configure` OR AWS CloudShell)
-- Knowledge Base created manually in AWS Bedrock
-- S3 buckets for documents and vector store
+- Knowledge Base created manually in AWS Bedrock (see steps below)
+- S3 bucket for documents (see steps below)
 
 **Note**: Node.js, CDK CLI, Docker, and other build tools are handled automatically by the deploy.sh script via CodeBuild
 
 **Time Requirements**:
+- **Prerequisites Setup**: 30 minutes (Knowledge Base creation and data sync)
 - **Deployment**: Up to 1 hour for complete infrastructure setup
 - **Cleanup**: Up to 1 hour 30 minutes for complete resource removal
+
+## Step-by-Step Prerequisites Setup
+
+### Step 1: Create S3 Buckets
+
+#### Documents Bucket
+1. Create S3 bucket: `s3-iecho-documents`
+2. Create folder structure:
+   ```
+   s3-iecho-documents/
+   ├── uploads/     # Raw uploaded files
+   └── processed/   # Files for Knowledge Base ingestion
+   ```
+3. Upload your TB and Agriculture documents to `processed/` folder
+4. **Supported formats**: PDF, DOCX, TXT, MD (Knowledge Base compatible formats)
+
+#### Vector Store Bucket
+1. Create S3 bucket: `s3-iecho-vector-store`
+2. Enable versioning on the bucket
+3. Note both bucket names for next steps
+
+### Step 2: Create Bedrock Knowledge Base
+
+1. Go to **AWS Bedrock Console** → **Knowledge Bases**
+2. Click **Create Knowledge Base**
+
+3. **Knowledge Base Details**:
+   - **Name**: `iECHO-RAG-Knowledge-Base`
+   - **Description**: Multi-domain RAG chatbot for TB and Agriculture
+   - **IAM Role**: Create and use a new service role
+
+4. **Data Source Configuration**:
+   - **Data source name**: `iecho-documents`
+   - **S3 URI**: `s3://s3-iecho-documents/processed/`
+   - **Chunking strategy**: Hierarchial chunking
+   - **Metadata**: Optional
+
+5. **Embeddings Model**:
+   - **Embeddings model**: Amazon Titan Text Embeddings G1 - Text
+   - **Dimensions**: 1536 (default)
+
+6. **Vector Database**:
+   - **Vector database**: Amazon S3 vector store
+   - **Amazon S3 vector store** with your vector store bucket
+
+7. **Review and Create**
+8. **Important**: After creation, click **Sync** to ingest your documents
+9. **Wait for sync completion** (this may take 10-30 minutes depending on document count)
+10. **Note down the Knowledge Base ID** from the details page (format: XXXXXXXXXX)
+
+### Step 3: Verify Knowledge Base
+1. Go to the Knowledge Base details page
+2. Ensure **Status** shows as "Available"
+3. Check **Data source** shows successful sync
 
 ## Deployment Options
 
@@ -39,7 +94,10 @@ Your AWS IAM user needs these specific permissions to run the deployment:
         "iam:CreateRole",
         "iam:AttachRolePolicy",
         "iam:GetRole",
-        "iam:PassRole"
+        "iam:PassRole",
+        "iam:PutRolePolicy",
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy"
       ],
       "Resource": "*"
     }
@@ -47,254 +105,247 @@ Your AWS IAM user needs these specific permissions to run the deployment:
 }
 ```
 
-**Secrets Manager** (for GitHub token storage):
+**CodeBuild Permissions**:
 ```json
 {
-  "Effect": "Allow",
-  "Action": [
-    "secretsmanager:CreateSecret",
-    "secretsmanager:UpdateSecret",
-    "secretsmanager:GetSecretValue"
-  ],
-  "Resource": "*"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codebuild:CreateProject",
+        "codebuild:StartBuild",
+        "codebuild:BatchGetBuilds",
+        "codebuild:DeleteProject",
+        "codebuild:ListProjects"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 ```
 
-**CodeBuild** (for deployment automation):
+**S3 Permissions** (for source code storage):
 ```json
 {
-  "Effect": "Allow",
-  "Action": [
-    "codebuild:CreateProject",
-    "codebuild:UpdateProject",
-    "codebuild:StartBuild",
-    "codebuild:BatchGetBuilds",
-    "codebuild:ImportSourceCredentials"
-  ],
-  "Resource": "*"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 ```
 
-**CloudWatch Logs** (for monitoring deployment):
+**CloudFormation Permissions**:
 ```json
 {
-  "Effect": "Allow",
-  "Action": [
-    "logs:CreateLogGroup",
-    "logs:CreateLogStream",
-    "logs:GetLogEvents",
-    "logs:FilterLogEvents"
-  ],
-  "Resource": "*"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:DescribeStackEvents"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 ```
 
-**Simplified Option**: Attach the `PowerUserAccess` managed policy to your IAM user, which provides all necessary permissions except IAM user/group management.
+## Environment Variables
 
-## Step-by-Step Deployment
+### Backend Environment Variables
+The deployment script will prompt for these values (no need to create .env files manually):
+- **Knowledge Base ID**: Your Bedrock Knowledge Base ID
+- **Documents Bucket**: S3 bucket name for document storage
+- **GitHub Owner**: ASUCICREPO (hardcoded)
+- **GitHub Repo**: IECHO-RAG-CHATBOT (hardcoded)
 
-### Step 1: Configure AWS CLI
-
-1. **Install AWS CLI** (if not already installed):
-   
-   **Linux:**
-   ```bash
-   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-   unzip awscliv2.zip
-   sudo ./aws/install
-   ```
-   
-   **macOS:**
-   ```bash
-   curl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"
-   sudo installer -pkg AWSCLIV2.pkg -target /
-   ```
-   
-   **Windows:**
-   Download and install from: https://awscli.amazonaws.com/AWSCLIV2.msi
-
-2. **Configure AWS CLI**:
-   ```bash
-   aws configure
-   ```
-   
-   You'll be prompted for:
-   - **AWS Access Key ID**: Your IAM user's access key
-   - **AWS Secret Access Key**: Your IAM user's secret key
-   - **Default region name**: e.g., `us-west-2`
-   - **Default output format**: `json` (recommended)
-
-3. **Verify Configuration**:
-   ```bash
-   aws sts get-caller-identity
-   ```
-   
-   This should return your user ARN and account ID.
-
-### Step 2: Create Required S3 Buckets
-
-#### Documents Bucket
-1. Create S3 bucket: `s3-iecho-documents` (choose unique name)
-2. Create folder structure:
-   ```
-   s3-iecho-documents/
-   ├── uploads/     # Raw uploaded files
-   └── processed/   # Files for Knowledge Base ingestion
-   ```
-3. Upload your TB and Agriculture documents to `uploads/` folder
-4. **Supported formats**: PDF, DOCX, XLSX, PPTX (auto-converted to PDF)
-
-#### Vector Store Bucket
-1. Create S3 bucket: `s3-iecho-vector-store` (choose unique name)
-2. Enable versioning on the bucket
-3. Note both bucket names for next steps
-
-### Step 3: Create Bedrock Knowledge Base
-
-1. Go to **AWS Bedrock Console** → **Knowledge Bases**
-2. Click **Create Knowledge Base**
-3. **Knowledge Base Details**:
-   - **Name**: `iECHO-RAG-Knowledge-Base`
-   - **Description**: Multi-domain RAG chatbot for TB and Agriculture
-   - **IAM Role**: Create and use a new service role
-
-4. **Data Source Configuration**:
-   - **Data source name**: `iecho-documents`
-   - **S3 URI**: `s3://s3-iecho-documents/processed/`
-   - **Chunking strategy**: Hierarchical chunking
-
-5. **Embeddings Model**:
-   - **Embeddings model**: Amazon Titan Text Embeddings G1 - Multimodal
-
-6. **Vector Database**:
-   - **Vector database**: Amazon S3
-   - **S3 bucket**: `s3-iecho-vector-store` (from Step 2)
-   - **S3 key prefix**: `vector-index/` (optional)
-
-7. **Review and Create**
-8. **Sync Data Source** after creation (this may take several minutes)
-9. **Note down the Knowledge Base ID** from the details page
-
-### Step 4: Clone and Setup Project
-
+### Frontend Environment Variables (Local Development)
+Copy `frontend/.env.example` to `frontend/.env.local`:
 ```bash
-# Clone the repository
-git clone https://github.com/ASUCICREPO/IECHO-RAG-CHATBOT
-cd iECHO-RAG-CHATBOT
+# API Base URL - The backend API Gateway URL (obtained after deployment)
+NEXT_PUBLIC_API_BASE_URL=https://your-api-gateway-url.execute-api.region.amazonaws.com/prod/
 ```
 
-### Step 5: Deploy Infrastructure
+## Deployment Steps
 
-⏱️ **Expected Time**: Up to 1 hour for complete deployment
-
+### 1. Clone Repository
 ```bash
-# Make deploy script executable
+git clone https://github.com/ASUCICREPO/IECHO-RAG-CHATBOT.git
+cd IECHO-RAG-CHATBOT
+```
+
+### 2. Make Scripts Executable
+```bash
 chmod +x deploy.sh
+chmod +x cleanup.sh
+```
 
-# Run deployment script (will prompt for required inputs)
+### 3. Run Deployment
+```bash
 ./deploy.sh
 ```
 
-**Deploy.sh Script Inputs**:
-- Action: Select `deploy`
-- GitHub repository URL
-- CodeBuild project name (alphanumeric, 2-255 chars)
-- Bedrock Knowledge Base ID (10 uppercase alphanumeric)
-- S3 documents bucket name (optional for office-to-PDF processor)
-- GitHub personal access token (needs repo permissions)
+The script will prompt you for:
+- **Knowledge Base ID**: Your Bedrock Knowledge Base ID (format: XXXXXXXXXX)
+- **Documents Bucket**: S3 bucket name for document storage
 
-### Step 6: Monitor Deployment
+### 4. Monitor Deployment
+The deployment process includes:
+1. **IAM Role Creation**: Creates CodeBuild service role with least-privilege permissions
+2. **Backend Deployment**: Deploys CDK infrastructure via CodeBuild (buildspec.yml)
+3. **Frontend Deployment**: Builds and deploys Next.js app to Amplify (buildspec-frontend.yml)
 
-The script will:
-1. Create IAM service role with AdministratorAccess for CodeBuild
-2. Store GitHub token in AWS Secrets Manager
-3. Create/update CodeBuild project
-4. Execute deployment via CodeBuild
-5. Stream real-time logs from CloudWatch
-6. Display API Gateway and Amplify URLs on success
+Monitor progress via:
+- Console output with build URLs
+- AWS CodeBuild console
+- AWS CloudFormation console
 
-**Deployment Progress**:
-- **Initial Setup**: 2-3 minutes (IAM roles, CodeBuild project)
-- **Infrastructure Deployment**: 30-45 minutes (EKS cluster, VPC, ALB)
-- **Application Deployment**: 10-15 minutes (Docker build, Kubernetes deployment)
-- **Frontend Deployment**: 5-10 minutes (Amplify build and deployment)
+## Deployment Architecture
 
-### Step 7: Test Deployment
+### Build Process
+1. **deploy.sh** creates CodeBuild projects with specific IAM permissions
+2. **buildspec.yml** handles backend CDK deployment only
+3. **buildspec-frontend.yml** handles frontend Amplify deployment only
+4. Both buildspecs are kept for monitoring/debugging purposes
 
-```bash
-# Health check
-curl https://your-api-gateway-url/health
+### Security
+- **Least Privilege IAM**: Custom IAM policy with only required permissions (no PowerUserAccess)
+- **Service-Specific Permissions**: Each AWS service gets only necessary actions
+- **Temporary Resources**: S3 buckets cleaned up after deployment
 
-# Test chat endpoint
-curl -X POST https://your-api-gateway-url/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What are the main symptoms of tuberculosis?",
-    "userId": "test-user-123",
-    "sessionId": "session-456"
-  }'
+## Post-Deployment
 
-# Test streaming endpoint
-curl -X POST https://your-api-gateway-url/chat-stream \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "How can I improve soil fertility?",
-    "userId": "farmer-456",
-    "sessionId": "session-789"
-  }'
-```
+### Accessing Your Application
+After successful deployment, you'll receive:
+- **API Gateway URL**: Backend API endpoint
+- **Amplify App URL**: Frontend web application
+- **CodeBuild Project Names**: For monitoring future deployments
 
-## Infrastructure Components Deployed
-
-- **EKS Fargate Cluster**: Kubernetes v1.32 with full logging
-- **VPC**: 2 AZs, 1 NAT Gateway, public/private subnets
-- **Docker Application**: Python 3.12 FastAPI app with 2 replicas
-- **ALB Controller**: AWS Load Balancer Controller v1.8.0 via Helm
-- **API Gateway**: REST API with CORS, proxies to ALB
-- **DynamoDB**: Pay-per-request feedback table with TTL
-- **CloudWatch**: Application logs with infinite retention
-- **Amplify**: Frontend deployment with GitHub integration
-- **Office-to-PDF Lambda** (optional): Document conversion service
+### Testing
+1. **Frontend**: Access the Amplify URL to test the web interface
+2. **API**: Test API endpoints using the Gateway URL
+3. **Local Development**: Use `.env.local` with API Gateway URL for local frontend development
 
 ## Cleanup
 
-⏱️ **Expected Time**: Up to 1 hour 30 minutes for complete cleanup
-
+### Complete Cleanup
 ```bash
-# Use the deploy script in destroy mode
-./deploy.sh
-# Select "destroy" action and provide CodeBuild project name
+./cleanup.sh
 ```
 
-**Cleanup Progress**:
-- **Application Removal**: 5-10 minutes (Kubernetes resources, ALB)
-- **EKS Cluster Deletion**: 45-60 minutes (cluster, node groups, networking)
-- **Infrastructure Cleanup**: 15-20 minutes (VPC, security groups, remaining resources)
+This will:
+1. Clean up CodeBuild projects first
+2. Remove S3 source buckets
+3. Handle EKS and network dependencies
+4. Clean up security group rules
+5. Destroy CloudFormation stack via CDK destroy with retry logic
+6. Clean up IAM roles
 
-**Note**: The cleanup process includes automatic handling of Kubernetes security groups that may prevent CDK destruction. The script will retry if initial cleanup fails.
+### Cleanup Process
+The cleanup script uses a smart approach:
+1. **First attempt**: CDK destroy (handles proper resource deletion order)
+2. **If it fails**: Clean up security group dependencies and retry CDK destroy
+3. **Final cleanup**: Remove any remaining CodeBuild projects and IAM roles
+
+### Manual Cleanup (if needed)
+If automated cleanup fails:
+1. Check AWS CloudFormation console for stuck resources
+2. Look for security group dependency issues
+3. Check EKS cluster deletion status
+4. Verify VPC resources are properly removed
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **AWS CLI not configured**: Run `aws configure` with valid credentials
-2. **Knowledge Base not found**: Verify the KB ID provided to deploy.sh script
-3. **Permission denied**: Check IAM user permissions above
-4. **Deploy script fails**: Check script permissions with `chmod +x deploy.sh`
-5. **CodeBuild role creation fails**: Ensure your IAM user has `iam:CreateRole` permission
-6. **Deployment timeout**: EKS cluster creation can take 30-45 minutes - this is normal
-7. **Cleanup stuck**: Security groups may prevent deletion - the script handles this automatically
+**CodeBuild Role Issues**:
+- Ensure IAM permissions are correctly set
+- Wait 10 seconds after role creation for propagation (handled automatically)
 
-### Logs
+**Frontend Build Failures**:
+- Check buildspec-frontend.yml syntax
+- Verify Amplify app creation succeeded (no GitHub integration)
+- Check environment variables are passed correctly
 
-Check CloudWatch logs for detailed error information:
+**CDK Deployment Failures**:
+- Verify Knowledge Base ID exists and is accessible
+- Check S3 bucket permissions and existence
+- Ensure EKS service limits aren't exceeded
+
+**Cleanup Issues**:
+- Security groups may have dependencies - script handles this automatically with retry logic
+- EKS resources may take time to delete - CDK handles proper ordering
+- Check CloudFormation events for specific failure reasons
+
+**YAML Syntax Errors**:
+- Buildspec files use specific YAML syntax
+- Multi-line commands use proper formatting
+- Environment variables are correctly passed
+
+### Getting Help
+- Check AWS CloudFormation events for detailed error messages
+- Review CodeBuild logs via the provided console URLs
+- Verify all prerequisites are met before deployment
+- Ensure Knowledge Base ID and Documents Bucket exist and are accessible
+
+### Accessing Logs for Troubleshooting
+
+**CodeBuild Logs** (during deployment):
 ```bash
-# Application logs
-aws logs tail /aws/eks/your-cluster-name/agent-service --follow
+# View logs for backend deployment
+aws logs tail /aws/codebuild/iecho-rag-[timestamp]-main --follow
 
-# EKS cluster logs
-aws logs tail /aws/eks/your-cluster-name/cluster --follow
-
-# CodeBuild logs (during deployment)
-aws logs tail /aws/codebuild/your-project-name --follow
+# View logs for frontend deployment  
+aws logs tail /aws/codebuild/iecho-rag-[timestamp]-frontend --follow
 ```
+
+**Application Logs** (after deployment):
+```bash
+# EKS application logs
+aws logs tail /aws/containerinsights/[cluster-name]/application --follow
+
+# API Gateway logs
+aws logs tail API-Gateway-Execution-Logs_[api-id]/prod --follow
+
+# Lambda function logs (office-to-PDF)
+aws logs tail /aws/lambda/AgentFargateStack-OfficeToPDF --follow
+```
+
+**CloudWatch Log Groups**:
+- `/aws/codebuild/[project-name]` - Build and deployment logs
+- `/aws/eks/[cluster-name]/cluster` - EKS cluster logs  
+- `/aws/containerinsights/[cluster-name]/application` - Application container logs
+- `/aws/lambda/[function-name]` - Lambda function logs
+- `API-Gateway-Execution-Logs_[api-id]/prod` - API Gateway execution logs
+
+**Viewing Logs in AWS Console**:
+1. Go to **CloudWatch** → **Log groups**
+2. Find the relevant log group from the list above
+3. Click on the log group to view log streams
+4. Select the most recent log stream for current logs
+
+## Infrastructure Components Deployed
+
+- **EKS Fargate Cluster**: Kubernetes cluster with Fargate profiles
+- **VPC**: Multi-AZ setup with public/private subnets and NAT Gateway
+- **Application Load Balancer**: Routes traffic to EKS services
+- **API Gateway**: REST API with CORS, proxies to ALB
+- **Amplify App**: Frontend hosting (no GitHub integration, manual deployment)
+- **DynamoDB**: Feedback storage with TTL
+- **CloudWatch**: Comprehensive logging
+- **Lambda Functions**: Document processing (office-to-PDF conversion)
+- **IAM Roles**: Least-privilege service roles for all components
