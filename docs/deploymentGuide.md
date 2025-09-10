@@ -21,84 +21,84 @@ First, log in to AWS Console
 #### Documents Bucket
 1. Search S3 in search bar in console.
 2. Click on `"General purpose buckets"` in left pane
-3. Click on `Create bucket` on main window
-4. Keep the bucket type `General purpose`
-5. Give the bucket name `s3-iecho-documents`
-6. Under Bucket Versioning, select `Enable`
+3. Click on `"Create bucket"` on main window
+4. Keep the bucket type `"General purpose"`
+5. Give the bucket name `"s3-iecho-documents"`
+6. Under Bucket Versioning, select `"Enable"`
 7. Keep other configurations as it is
-8. Click on `Create bucket`, now bucket will be created, should take less then a minute
-9. Once done, search the bucket by name `s3-iecho-documents`
-10. Click on bucket name `s3-iecho-documents`, this will display the contents of bucket
-11. Click on `Create folder`
-12. Give folder name `uploads` and click on `Create folder`
-13. Again, click on `Create folder`
-14. Give folder name `processed` and click on `Create folder`
+8. Click on `"Create bucket"`, now bucket will be created, should take less then a minute
+9. Once done, search the bucket by name `"s3-iecho-documents"`
+10. Click on bucket name `"s3-iecho-documents"`, this will display the contents of bucket
+11. Click on `"Create folder"`
+12. Give folder name `"uploads"` and click on `"Create folder"`
+13. Again, click on `"Create folder"`
+14. Give folder name `"processed"` and click on `"Create folder"`
 15. This will create the following folder structure:
    ```
    s3-iecho-documents/
-   ├── uploads/     # Raw uploaded files
-   └── processed/   # Files for Knowledge Base ingestion
+   ├── uploads/     
+   └── processed/   
    ```
-16. Click on folder name `uploads/`
-17. Click on `Upload` button
-18. Click on `Add files`
+16. Click on folder name `"uploads/"`
+17. Click on `"Upload"` button
+18. Click on `"Add files"`
 19. Select all the files that you want to upload
 20. **Supported formats**: PDF, DOCX, XLSX, PPTX
-21. Click on `Upload`, wait for files to be uploaded
-22. Once uploaded, click on `close`
-23. Now, your TB and Agriculture documents are uploaded in `uploads/` folder
+21. Click on `"Upload"`, wait for files to be uploaded
+22. Once uploaded, click on `"close"`
+23. Now, your TB and Agriculture documents are uploaded in `"uploads/"` folder
     
 #### Vector Store Bucket
-1. Click on `hamburger menu` on top left
-2. Select `Vector buckets`
-3. Click on `Create vector bucket` button
-4. Give vector bucket name: `s3-iecho-vector-store`
-5. Click on `Create vector bucket` button
-6. This will create the vector bucket
-7. Search the vector bucket by name `s3-iecho-vector-store`
-8. Click on the bucket name `s3-iecho-vector-store`
-9. This will open the contents of the vector bucket
-10. Click on `Create vector index`
-11. Under the properties set the vector index name as `s3-iecho-vector-index`
-12. Set dimensions to `1536`
-13. Click on `Additional settings`
-14. Under non-filterable metadata, add following keys:
+1. Select `"Vector buckets"` in left pane
+2. Click on `"Create vector bucket"` button
+3. Give vector bucket name: `"s3-iecho-vector-store"`
+4. Click on `"Create vector bucket"` button
+5. This will create the vector bucket
+6. Search the vector bucket by name `"s3-iecho-vector-store"`
+7. Click on the bucket name `"s3-iecho-vector-store"`
+8. This will open the contents of the vector bucket
+9. Click on `"Create vector index"`
+10. Under the properties set the vector index name as `"s3-iecho-vector-index"`
+11. Set dimensions to `"1536"`
+12. Click on `"Additional settings"`
+13. Under non-filterable metadata, add following keys:
    - `AMAZON_BEDROCK_TEXT`
    - `AMAZON_BEDROCK_METADATA`
-15. Click on `Create vector index`
-16. This will create a vector index inside vector bucket
-17. Note both bucket names for next steps
+14. Click on `"Create vector index"`
+15. This will create a vector index inside vector bucket
+
+Note both bucket names (vector bucket and general purpose bucket) for next steps
 
 ### Step 2: Create Bedrock Knowledge Base
 
-1. Now, search `Amazon Bedrock` in search bar in console
-2. Click on `Amazon Bedrock`
-3. In left pane, under the `Build` section, select `Knowledge Bases`
-4. Click `Create`
-5. Select `Knowledge Base with vector store` under `Unstructred data`
-6. Give knowledge base name: `iECHO-RAG-Knowledge-Base`
-7. Choose data source type: `Amazon S3`
+1. Now, search `"Amazon Bedrock"` in search bar in console
+2. Click on `"Amazon Bedrock"`
+3. In left pane, under the `"Build"` section, select `"Knowledge Bases"`
+4. Click `"Create"`
+5. Select `"Knowledge Base with vector store"` under `"Unstructred data"`
+6. Give knowledge base name: `"iECHO-RAG-Knowledge-Base"`
+7. Choose data source type: `"Amazon S3"`
 8. Keep other configurations as it is
-9. Click `Next`
+9. Click `"Next"`
 10. Select the following for Data Source Configuration:
    - **Data source name**: `iecho-documents`
    - **S3 URI**: `s3://s3-iecho-documents/processed/`
    - **Parsing strategy**: `Amazon Bedrock Data Automation as parser`
    - **Chunking strategy**: `Hierarchial chunking`
 11. Keep other configurations as it is
-12. Click `Next`
-13. Select embeddings model: `Amazon Titan Embeddings G1`
-14. Under vector store, select `Use an existing vector store`
-15. Select vector store type: `S3 Vectors - Preview`
-16. Click on `Browse S3`
-17. Search vector bucket by name: `s3-iecho-vector-store`
+12. Click `"Next"`
+13. Select embeddings model: `"Amazon Titan Embeddings G1"`
+14. Under vector store, select `"Use an existing vector store"`
+15. Select vector store type: `"S3 Vectors - Preview"`
+16. Click on `"Browse S3"`
+17. Search vector bucket by name: `"s3-iecho-vector-store"`
 18. Select the bucket
-19. For s3 vector index ARN, select `s3-iecho-vector-index`
-20. Select multimodal storage destination as `s3://s3-iecho-documents`
-21. Click `Next`
+19. For s3 vector index ARN, select `"s3-iecho-vector-index"`, it will populate the ARN automatically from the name
+20. Select multimodal storage destination as `"s3://s3-iecho-documents"`
+21. Click `"Next"`
 22. Review the datails
-23. Click on `Create Knowledge Base`, this will create the knowledge base and should take less than 2 minutes
-24. **Note down the Knowledge Base ID** from the details page (format: XXXXXXXXXX)
+23. Click on `"Create Knowledge Base"`, this will create the knowledge base and should take less than 2 minutes
+24. **Note down the Knowledge Base ID** from the `"Knowledge Base overview"` section (format: XXXXXXXXXX)
 
 ## Deployment Options
 
