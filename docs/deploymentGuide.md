@@ -20,7 +20,7 @@ First, log in to AWS Console
 
 #### Documents Bucket
 1. Search S3 in search bar in console.
-2. Click on "General purpose buckets" in left pane
+2. Click on `"General purpose buckets"` in left pane
 3. Click on `Create bucket` on main window
 4. Keep the bucket type `General purpose`
 5. Give the bucket name `s3-iecho-documents`
