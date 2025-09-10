@@ -1,4 +1,4 @@
-import EchoKnowledgeBase from "../echo-knowledge-base"
+import EchoKnowledgeBase from "../pages/echo-knowledge-base"
 
 export default function Page() {
   return (

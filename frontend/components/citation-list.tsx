@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { ChevronDown } from "lucide-react"
-import { config } from "@/lib/config"
+import { config, getApiEndpoint } from "@/lib/config"
 
 interface Citation {
   title: string;
@@ -37,7 +37,7 @@ export default function CitationList({ citations }: CitationListProps) {
                   onClick={async () => {
                     try {
                       const encodedPath = encodeURIComponent(cite.source);
-                      const response = await fetch(`${config.apiUrl}/document-url/${encodedPath}`);
+                      const response = await fetch(getApiEndpoint(`/document-url/${encodedPath}`));
                       if (!response.ok) throw new Error(`HTTP ${response.status}`);
                       const data = await response.json();
                       if (data.url) {
