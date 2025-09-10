@@ -530,10 +530,6 @@ done
 # Cleanup and Results
 # --------------------------------------------------
 
-echo "🧹 Cleaning up temporary S3 bucket..."
-aws s3 rm s3://$S3_BUCKET --recursive >/dev/null 2>&1 || true
-aws s3 rb s3://$S3_BUCKET >/dev/null 2>&1 || true
-
 if [ "$ACTION" = "destroy" ]; then
   echo "🧹 Cleaning up IAM role..."
   aws iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "iECHODeploymentPolicy" >/dev/null 2>&1 || true
@@ -666,7 +662,10 @@ if [ "$BUILD_STATUS" = "SUCCEEDED" ]; then
       echo "Frontend status: $FRONTEND_STATUS"
     done
     
-    # No frontend S3 bucket cleanup needed - reusing backend bucket
+    # Cleanup S3 bucket after both deployments
+    echo "🧹 Cleaning up temporary S3 bucket..."
+    aws s3 rm s3://$S3_BUCKET --recursive >/dev/null 2>&1 || true
+    aws s3 rb s3://$S3_BUCKET >/dev/null 2>&1 || true
     
     if [ "$FRONTEND_STATUS" = "SUCCEEDED" ]; then
       echo ""
@@ -685,6 +684,11 @@ if [ "$BUILD_STATUS" = "SUCCEEDED" ]; then
       echo "❌ Frontend deployment failed with status: $FRONTEND_STATUS"
       echo "✅ Backend deployment was successful"
       echo "🔗 Check frontend logs: https://console.aws.amazon.com/codesuite/codebuild/projects/$FRONTEND_PROJECT/build/$FRONTEND_BUILD_ID/"
+      
+      # Still cleanup S3 bucket even if frontend failed
+      echo "🧹 Cleaning up temporary S3 bucket..."
+      aws s3 rm s3://$S3_BUCKET --recursive >/dev/null 2>&1 || true
+      aws s3 rb s3://$S3_BUCKET >/dev/null 2>&1 || true
     fi
   fi
 else
