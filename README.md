@@ -93,7 +93,7 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
    - `hooks/`: Custom React hooks (use-chat, use-feedback)
    - `lib/`: Utility functions and configuration
    - `.env.example`: Template for frontend environment variables
-4. **Root**: Deployment scripts and build configurations
+5. **Root**: Deployment scripts and build configurations
    - `deploy.sh`: Main deployment script (backend + frontend)
    - `cleanup.sh`: Complete resource cleanup script
    - `buildspec.yml`: Backend deployment buildspec
