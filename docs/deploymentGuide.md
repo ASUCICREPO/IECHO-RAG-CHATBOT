@@ -9,7 +9,7 @@
 **Note**: Node.js, CDK CLI, Docker, and other build tools are handled automatically by the deploy.sh script via CodeBuild
 
 **Time Requirements**:
-- **Prerequisites Setup**: 30 minutes (Knowledge Base creation and data sync)
+- **Prerequisites Setup**: 10-15 minutes (Knowledge Base creation)
 - **Deployment**: Up to 1 hour for complete infrastructure setup
 - **Cleanup**: Up to 1 hour 30 minutes for complete resource removal
 
