@@ -8,7 +8,7 @@ set -euo pipefail
 
 echo "🗑️  iECHO RAG Chatbot Cleanup"
 echo ""
-echo "This will destroy all iECHO resources and CodeBuild projects."
+echo "This will destroy all iECHO resources using the main deployment script."
 echo ""
 read -rp "Are you sure you want to proceed? (y/N): " confirm
 
@@ -21,10 +21,10 @@ echo ""
 echo "🧹 Starting cleanup..."
 
 # --------------------------------------------------
-# 1. Clean up CodeBuild projects
+# 1. Clean up CodeBuild projects first
 # --------------------------------------------------
 
-echo "🔨 Cleaning up CodeBuild projects..."
+echo "🔨 Cleaning up existing CodeBuild projects..."
 
 # Find and delete all iECHO CodeBuild projects
 CODEBUILD_PROJECTS=$(aws codebuild list-projects --query 'projects[?contains(@, `iecho-rag`)]' --output text)
@@ -40,30 +40,10 @@ else
 fi
 
 # --------------------------------------------------
-# 2. Clean up S3 source buckets
+# 2. Run infrastructure destroy via buildspec
 # --------------------------------------------------
 
-echo "🪣 Cleaning up S3 source buckets..."
-
-# Find and delete source buckets
-SOURCE_BUCKETS=$(aws s3api list-buckets --query 'Buckets[?contains(Name, `codebuild-source`) || contains(Name, `frontend-source`)].Name' --output text)
-
-if [ -n "$SOURCE_BUCKETS" ]; then
-  for bucket in $SOURCE_BUCKETS; do
-    echo "Emptying and deleting S3 bucket: $bucket"
-    aws s3 rm s3://$bucket --recursive >/dev/null 2>&1 || echo "Bucket already empty"
-    aws s3 rb s3://$bucket >/dev/null 2>&1 || echo "Bucket deletion failed"
-  done
-  echo "✅ Source buckets cleaned up"
-else
-  echo "⚠️  No source buckets found"
-fi
-
-# --------------------------------------------------
-# 3. Run infrastructure destroy
-# --------------------------------------------------
-
-echo "🚀 Starting infrastructure destroy..."
+echo "🚀 Starting infrastructure destroy via buildspec..."
 
 # Call the main deployment script with destroy action
 ./deploy.sh destroy
