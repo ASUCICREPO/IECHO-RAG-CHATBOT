@@ -570,31 +570,28 @@ export class AgentEksFargateStack extends Stack {
     
     api.node.addDependency(albDnsProvider);
 
-    // Amplify App with GitHub App integration
+    // Amplify App for manual deployment (no GitHub integration)
     const amplifyApp = new amplify.CfnApp(this, "iECHOAmplifyApp", {
       name: "iECHO-RAG-Chatbot",
       description: "iECHO RAG Chatbot Frontend",
-      repository: `https://github.com/${this.node.tryGetContext("githubOwner") || "ASUCICREPO"}/${this.node.tryGetContext("githubRepo") || "IECHO-RAG-CHATBOT"}`,
-      accessToken: SecretValue.secretsManager("github-access-token").unsafeUnwrap(),
       platform: "WEB",
       buildSpec: `version: 1
 frontend:
   phases:
     preBuild:
       commands:
-        - cd frontend
         - npm ci
     build:
       commands:
         - npm run build
   artifacts:
-    baseDirectory: frontend/out
+    baseDirectory: out
     files:
       - '**/*'
   cache:
     paths:
-      - frontend/node_modules/**/*
-      - frontend/.next/cache/**/*`,
+      - node_modules/**/*
+      - .next/cache/**/*`,
       environmentVariables: [
         {
           name: "NEXT_PUBLIC_API_BASE_URL",
@@ -603,15 +600,7 @@ frontend:
       ]
     });
 
-    // Create branch for auto-build
-    const fullCdkBranch = new amplify.CfnBranch(this, "FullCdkBranch", {
-      appId: amplifyApp.attrAppId,
-      branchName: "full-cdk",
-      enableAutoBuild: true,
-      stage: "PRODUCTION"
-    });
-
-    // Note: Repository connection via GitHub App must be done manually in Amplify console
+    // Note: No repository connection - using manual zip deployment
 
     // Outputs
     this.exportValue(api.url, { name: "ApiGatewayUrl", description: "The API Gateway URL" });
