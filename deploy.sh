@@ -530,10 +530,7 @@ done
 # Cleanup and Results
 # --------------------------------------------------
 
-echo "🧹 Cleaning up CodeBuild project..."
-aws codebuild delete-project --name "$CODEBUILD_PROJECT" >/dev/null 2>&1 || true
-
-echo "🧹 Cleaning up S3 bucket..."
+echo "🧹 Cleaning up temporary S3 bucket..."
 aws s3 rm s3://$S3_BUCKET --recursive >/dev/null 2>&1 || true
 aws s3 rb s3://$S3_BUCKET >/dev/null 2>&1 || true
 
@@ -560,17 +557,29 @@ if [ "$BUILD_STATUS" = "SUCCEEDED" ]; then
     echo "🎨 Starting frontend deployment..."
     
     # Get backend outputs for frontend
-    CDK_OUTPUTS=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs' --output json)
+    CDK_OUTPUTS=$(aws cloudformation describe-stacks --stack-name AgentFargateStack --query 'Stacks[0].Outputs' --output json --no-cli-pager)
+    
+    if [ $? -ne 0 ] || [ -z "$CDK_OUTPUTS" ] || [ "$CDK_OUTPUTS" = "null" ]; then
+      echo "❌ Error: Could not retrieve CDK stack outputs"
+      echo "Debug: CDK_OUTPUTS = '$CDK_OUTPUTS'"
+      exit 1
+    fi
+    
     API_GATEWAY_URL=$(echo "$CDK_OUTPUTS" | jq -r '.[] | select(.OutputKey == "ExportApiGatewayUrl") | .OutputValue')
     AMPLIFY_APP_ID=$(echo "$CDK_OUTPUTS" | jq -r '.[] | select(.OutputKey == "ExportAmplifyAppId") | .OutputValue')
     
+    # Validate required outputs
     if [ -z "$API_GATEWAY_URL" ] || [ "$API_GATEWAY_URL" = "null" ]; then
-      echo "❌ Could not get API Gateway URL from backend deployment"
+      echo "❌ Error: Could not find ExportApiGatewayUrl in CDK stack outputs"
+      echo "Available outputs:"
+      echo "$CDK_OUTPUTS" | jq .
       exit 1
     fi
     
     if [ -z "$AMPLIFY_APP_ID" ] || [ "$AMPLIFY_APP_ID" = "null" ]; then
-      echo "❌ Could not get Amplify App ID from backend deployment"
+      echo "❌ Error: Could not find ExportAmplifyAppId in CDK stack outputs"
+      echo "Available outputs:"
+      echo "$CDK_OUTPUTS" | jq .
       exit 1
     fi
     
@@ -580,36 +589,50 @@ if [ "$BUILD_STATUS" = "SUCCEEDED" ]; then
     
     # Create frontend CodeBuild project
     FRONTEND_PROJECT="${PROJECT_NAME}-frontend"
-    FRONTEND_S3_BUCKET="frontend-source-$(date +%s)"
     
-    echo "📦 Creating frontend source archive..."
-    aws s3 mb s3://$FRONTEND_S3_BUCKET
-    aws s3 cp source.zip s3://$FRONTEND_S3_BUCKET/frontend-source.zip
+    echo "📦 Reusing existing source archive for frontend..."
     
-    # Frontend environment variables
-    FRONTEND_ENV_VARS='[
-      {
-        "name": "API_GATEWAY_URL",
-        "value": "'$API_GATEWAY_URL'",
-        "type": "PLAINTEXT"
-      },
-      {
-        "name": "AMPLIFY_APP_ID",
-        "value": "'$AMPLIFY_APP_ID'",
-        "type": "PLAINTEXT"
-      }
-    ]'
+    # Build frontend environment variables using helper function
+    FRONTEND_ENV_VARS_ARRAY=""
+    
+    add_frontend_env_var() {
+      local name="$1"
+      local value="$2"
+      if [ -n "$value" ] && [ "$value" != "null" ]; then
+        if [ -n "$FRONTEND_ENV_VARS_ARRAY" ]; then
+          FRONTEND_ENV_VARS_ARRAY="$FRONTEND_ENV_VARS_ARRAY,"
+        fi
+        FRONTEND_ENV_VARS_ARRAY="$FRONTEND_ENV_VARS_ARRAY"'{
+            "name":  "'"$name"'",
+            "value": "'"$value"'",
+            "type":  "PLAINTEXT"
+          }'
+      fi
+    }
+    
+    add_frontend_env_var "API_GATEWAY_URL" "$API_GATEWAY_URL"
+    add_frontend_env_var "AMPLIFY_APP_ID" "$AMPLIFY_APP_ID"
     
     FRONTEND_ENVIRONMENT='{
       "type": "LINUX_CONTAINER",
       "image": "aws/codebuild/amazonlinux-x86_64-standard:5.0",
-      "computeType": "BUILD_GENERAL1_MEDIUM",
-      "environmentVariables": '$FRONTEND_ENV_VARS'
-    }'
+      "computeType": "BUILD_GENERAL1_MEDIUM"'
+    
+    # Add environment variables if any exist
+    if [ -n "$FRONTEND_ENV_VARS_ARRAY" ]; then
+      FRONTEND_ENVIRONMENT="$FRONTEND_ENVIRONMENT"',
+      "environmentVariables": ['"$FRONTEND_ENV_VARS_ARRAY"']'
+    fi
+    
+    FRONTEND_ENVIRONMENT="$FRONTEND_ENVIRONMENT"'}'
+    
+    # Debug: Show the environment variables being passed
+    echo "🔍 Debug: Environment variables JSON:"
+    echo "$FRONTEND_ENVIRONMENT" | jq .
     
     FRONTEND_SOURCE='{
       "type": "S3",
-      "location": "'$FRONTEND_S3_BUCKET'/frontend-source.zip",
+      "location": "'$S3_BUCKET'/source.zip",
       "buildspec": "buildspec-frontend.yml"
     }'
     
@@ -643,11 +666,7 @@ if [ "$BUILD_STATUS" = "SUCCEEDED" ]; then
       echo "Frontend status: $FRONTEND_STATUS"
     done
     
-    # Cleanup frontend resources
-    echo "🧹 Cleaning up frontend CodeBuild project..."
-    aws codebuild delete-project --name "$FRONTEND_PROJECT" >/dev/null 2>&1 || true
-    aws s3 rm s3://$FRONTEND_S3_BUCKET --recursive >/dev/null 2>&1 || true
-    aws s3 rb s3://$FRONTEND_S3_BUCKET >/dev/null 2>&1 || true
+    # No frontend S3 bucket cleanup needed - reusing backend bucket
     
     if [ "$FRONTEND_STATUS" = "SUCCEEDED" ]; then
       echo ""
@@ -657,6 +676,10 @@ if [ "$BUILD_STATUS" = "SUCCEEDED" ]; then
       echo "📋 Your iECHO RAG Chatbot is now live!"
       echo "  - API Gateway: $API_GATEWAY_URL"
       echo "  - Frontend: Check Amplify console for URL"
+      echo ""
+      echo "🔗 CodeBuild Projects (for monitoring/debugging):"
+      echo "  - Backend: $CODEBUILD_PROJECT"
+      echo "  - Frontend: $FRONTEND_PROJECT"
     else
       echo ""
       echo "❌ Frontend deployment failed with status: $FRONTEND_STATUS"

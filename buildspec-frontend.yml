@@ -56,8 +56,3 @@ phases:
           --branch-name main \
           --job-id $JOB_ID
       - echo "✅ Frontend deployment completed successfully!"
-
-artifacts:
-  files:
-    - build.zip
-  base-directory: frontend/out
