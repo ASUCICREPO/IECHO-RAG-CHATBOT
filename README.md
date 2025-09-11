@@ -119,13 +119,11 @@ Common issues and solutions can be found in the [Troubleshooting Guide](./docs/t
 
 ## Credits
 
-This application was architected and developed by:
+This application was Developed by:
 
 - **Sahajpreet Singh Khasria** - Backend Developer (<a href="https://www.linkedin.com/in/sahajpreet" target="_blank">LinkedIn</a>)
 - **Apoorv Singh** - Frontend Developer (<a href="https://www.linkedin.com/in/apoorv16/" target="_blank">LinkedIn</a>)
 - **Jenny Nguyen** - UI/UX Designer (<a href="https://www.linkedin.com/in/jennnyen/" target="_blank">LinkedIn</a>)
-
-Thanks to the development team for their guidance and support in building this intelligent multi-domain RAG chatbot solution.
 
 ## License
 
