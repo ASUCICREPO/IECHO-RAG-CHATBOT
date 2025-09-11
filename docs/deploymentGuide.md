@@ -329,6 +329,18 @@ Monitor progress via:
 
 ## Post-Deployment
 
+### Critical: Sync Knowledge Base Data Source
+**Important**: After the complete application deployment, you must sync the knowledge base data source to ensure proper functionality:
+
+1. Go to **Amazon Bedrock** → **Knowledge Bases**
+2. Select your knowledge base: `iECHO-RAG-Knowledge-Base`
+3. Click on the **Data Sources** tab
+4. Select your data source: `iecho-documents`
+5. Click **Sync** to process all uploaded documents
+6. Wait for sync completion (this may take several minutes depending on document count)
+
+> **Note**: The application will not function properly until the data source sync is completed.
+
 ### Accessing Your Application
 After successful deployment, you'll receive:
 - **API Gateway URL**: Backend API endpoint

@@ -11,6 +11,7 @@ An intelligent multi-domain chatbot built with AWS Bedrock, Strands framework, a
 | [User Guide](#user-guide)                           | The working solution                                    |
 | [Directories](#directories)                         | General project directory structure                     |
 | [API Documentation](#api-documentation)             | Documentation on the API the project uses               |
+| [Agent Creation](#agent-creation)                   | Guide for adding new specialist agents                  |
 | [Evaluation](#evaluation)                           | Model evaluation and testing framework                  |
 | [Troubleshooting](#troubleshooting)                 | Common issues and solutions                             |
 | [Credits](#credits)                                 | Meet the team behind the solution                       |
@@ -47,6 +48,7 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 │   ├── deploymentGuide.md
 │   ├── userGuide.md
 │   ├── APIdoc.md
+│   ├── agentCreation.md
 │   ├── evaluationGuide.md
 │   ├── troubleshooting.md
 │   └── media/
@@ -102,6 +104,10 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 ## API Documentation
 
 Here you can learn about the API the project uses: [API Documentation](./docs/APIdoc.md).
+
+## Agent Creation
+
+Guide for adding new specialist agents can be found in the [Agent Creation Guide](./docs/agentCreation.md).
 
 ## Evaluation
 
