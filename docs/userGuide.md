@@ -83,9 +83,9 @@ Click any question to get started immediately.
 
 **Image Input**:
 - Click the camera icon (📷) to upload images
-- Supported formats: JPG, PNG, GIF
-- Maximum file size: 10MB
-- Use for plant disease identification, medical images, or visual questions
+- Supported formats: JPG, PNG
+- Maximum file size: 5MB
+- Enhanced context
 
 ![Image Upload Process](./media/image-upload-process.png)
 
