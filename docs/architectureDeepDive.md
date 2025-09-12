@@ -70,7 +70,7 @@ The iECHO RAG Chatbot implements a sophisticated multi-domain conversational AI 
 - **Lambda Functions** (Optional):
   - **office-to-pdf**: Converts DOCX, XLSX, PPTX files to PDF format
   - **Event-driven**: Triggered by S3 uploads for automatic document processing
-  - **Runtime**: Python 3.12 with LibreOffice for document conversion
+  - **Runtime**: Node.js 18.x with LibreOffice for document conversion
 
 ### Monitoring & Logging
 - **CloudWatch**: 
