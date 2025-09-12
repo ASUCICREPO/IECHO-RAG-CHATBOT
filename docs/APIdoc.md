@@ -12,7 +12,8 @@ The API uses a multi-agent architecture powered by the Strands framework for edu
 - **TB Specialist Agent**: Provides educational information about tuberculosis and health topics with knowledge base integration
 - **Agriculture Specialist Agent**: Offers educational content on farming, crops, irrigation, food safety, and water management
 - **Image Analysis**: Optional image processing via strands_tools.image_reader for visual content understanding
-- **Knowledge Base Integration**: AWS Bedrock Knowledge Base with Amazon Titan Text Embeddings G1 - Text and hierarchical chunking
+- **Knowledge Base Integration**: AWS Bedrock Knowledge Base with Amazon Nova Lite model (us.amazon.nova-lite-v1:0), Amazon Titan 
+Text Embeddings G1 - Text and hierarchical chunking
 
 **Important**: This is an educational tool and should not be used for medical diagnosis or treatment decisions.
 
@@ -97,21 +98,22 @@ Streaming chat endpoint with real-time response generation via Server-Sent Event
 Server-Sent Events stream with the following event types:
 
 ```
-data: {"type": "start", "sessionId": "session-789"}
-
-data: {"type": "token", "data": "Improving"}
-
-data: {"type": "token", "data": " irrigation"}
-
-data: {"type": "token", "data": " efficiency"}
-
-data: {"type": "complete", "responseId": "uuid", "citations": [...], "followUpQuestions": [...]}
+{"type": "thinking_start"}
+{"type": "thinking", "data": "Let me analyze this irrigation question..."}
+{"type": "thinking_end"}
+{"type": "content", "data": "Improving"}
+{"type": "content", "data": " irrigation"}
+{"type": "error", "data": "Request timeout. Please try again."}
+{"response": "Complete response text", "citations": [...], "sessionId": "...", "responseId": "...", "userId": "...", "followUpQuestions": [...]}
 ```
 
 **Event Types:**
-- `start`: Stream initialization with session ID
-- `token`: Individual word/token in the response
-- `complete`: Final event with metadata, citations, and follow-up questions
+- `thinking_start`: Indicates the agent is beginning to reason about the query
+- `thinking`: Contains reasoning text (can be hidden from users)
+- `thinking_end`: Indicates reasoning phase is complete
+- `content`: Individual content chunks for the final response
+- `error`: Error message if something goes wrong
+- Final JSON object: Complete response with metadata, citations, and follow-up questions
 
 ### POST /feedback
 
@@ -151,10 +153,12 @@ List processed documents available in the knowledge base.
   "documents": [
     {
       "key": "processed/tb-guidelines-2024.pdf",
+      "name": "tb-guidelines-2024.pdf",
       "lastModified": "2025-01-15T10:00:00Z",
       "size": 1024000
     }
-  ]
+  ],
+  "count": 1
 }
 ```
 
@@ -168,8 +172,7 @@ Generate presigned URL for document access.
 **Response:**
 ```json
 {
-  "url": "https://s3.amazonaws.com/bucket/document.pdf?presigned-params",
-  "expiresIn": 3600
+  "url": "https://s3.amazonaws.com/bucket/document.pdf?presigned-params"
 }
 ```
 
@@ -180,15 +183,13 @@ System status with configuration details.
 **Response:**
 ```json
 {
-  "status": "operational",
-  "knowledgeBaseId": "KB123456789",
+  "service": "iECHO RAG Chatbot API",
+  "status": "running",
+  "knowledgeBaseConfigured": true,
+  "documentsConfigured": true,
+  "feedbackConfigured": true,
   "region": "us-west-2",
-  "version": "1.0.0",
-  "agents": {
-    "tb": "active",
-    "agriculture": "active",
-    "orchestrator": "active"
-  }
+  "timestamp": "2025-01-15T10:04:44.810349"
 }
 ```
 
@@ -212,11 +213,13 @@ System status with configuration details.
 ```
 
 ### Common Error Codes
-- `INVALID_REQUEST`: Malformed request body
-- `KNOWLEDGE_BASE_ERROR`: Knowledge base access issues
-- `AGENT_TIMEOUT`: Response generation timeout
-- `IMAGE_PROCESSING_ERROR`: Image analysis failure
-- `RATE_LIMIT_EXCEEDED`: Too many requests
+- **Empty Query**: `400 - Query cannot be empty`
+- **Query Too Long**: `400 - Query too long. X tokens provided, maximum 150 tokens allowed`
+- **Image Too Large**: `413 - Image too large. Maximum size is 5MB`
+- **Knowledge Base Not Configured**: `500 - Knowledge Base not configured`
+- **Invalid S3 URL**: `400 - Invalid S3 URL format`
+- **No Data Sources**: `500 - No data sources found in Knowledge Base`
+- **Request Timeout**: Stream error event with "Request timeout. Please try again."
 
 ## Agent Routing Logic
 
