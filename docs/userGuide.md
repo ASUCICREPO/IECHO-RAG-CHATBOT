@@ -56,19 +56,13 @@ The system automatically determines which specialist agent should handle your qu
 
 ![Quick Start Questions](./media/quick-start-questions.png)
 
-When you first visit the application, you'll see suggested questions:
-
-**TB Questions**:
+When you first visit the application, you'll see quick start questions:
 - "What causes TB?"
 - "What are the main symptoms of pulmonary TB?"
 - "What is Ni-Kshay used for?"
-- "How is TB transmitted?"
-
-**Agriculture Questions**:
 - "How to improve crop irrigation efficiency?"
 - "What are sustainable farming practices?"
 - "What is crop rotation?"
-- "How to prevent crop diseases?"
 
 Click any question to get started immediately.
 
@@ -83,7 +77,7 @@ Click any question to get started immediately.
 
 **Image Input**:
 - Click the camera icon (📷) to upload images
-- Supported formats: JPG, PNG
+- Supported formats: All image formats (JPG, PNG, GIF, WebP, etc.)
 - Maximum file size: 5MB
 - Enhanced context
 
