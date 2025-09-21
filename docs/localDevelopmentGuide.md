@@ -32,11 +32,52 @@ Enter your:
 
 **Note**: This only needs to be done once per machine. Your credentials are stored in `~/.aws/credentials` and `~/.aws/config`.
 
-## Step 2: Create Required AWS Resources
+## Step 2: Verify Prerequisites
+
+Before creating AWS resources, verify you have access to required Bedrock models:
+
+### 2.1 Check Bedrock Model Access
+
+Verify you have access to required Bedrock models:
+
+```bash
+# Check Nova Lite model access
+aws bedrock list-foundation-models --region us-west-2 --query 'modelSummaries[?contains(modelId, `amazon.nova-lite-v1:0`)]'
+
+# Check Titan Embeddings model access  
+aws bedrock list-foundation-models --region us-west-2 --query 'modelSummaries[?contains(modelId, `amazon.titan-embed-g1-text-02`)]'
+```
+
+### 2.2 Request Model Access (if needed)
+
+If models are not available, request access in AWS Console:
+
+1. Go to **Amazon Bedrock** → **Model access**
+2. Request access for:
+   - **Amazon Nova Lite** (`amazon.nova-lite-v1:0`) - for chat responses
+   - **Amazon Titan Embeddings G1 - Text** (`amazon.titan-embed-g1-text-02`) - for knowledge base
+
+**Note**: Model access requests may take a few minutes to be approved.
+
+### 2.3 Verify Region Configuration
+
+Ensure you're working in the correct region:
+
+```bash
+# Check current region
+aws configure get region
+
+# Set region if needed
+aws configure set region us-west-2
+```
+
+**Important**: This solution must be deployed in **us-west-2** region.
+
+## Step 3: Create Required AWS Resources
 
 Before running locally, ensure you have these AWS resources deployed:
 
-### 2.1 Create Bedrock Knowledge Base
+### 3.1 Create Bedrock Knowledge Base
 
 #### Step 1: Create S3 Buckets
 
@@ -122,7 +163,7 @@ Note both bucket names (vector bucket and general purpose bucket) for next steps
 23. Click on `"Create Knowledge Base"`, this will create the knowledge base and should take less than 2 minutes
 24. **Note down the Knowledge Base ID** from the `"Knowledge Base overview"` section (format: XXXXXXXXXX)
 
-### 2.2 Create DynamoDB Table
+### 3.2 Create DynamoDB Table
 
 Create a DynamoDB table for feedback storage:
 
@@ -144,7 +185,7 @@ aws dynamodb create-table \
 - **Billing Mode**: Pay per request
 - **TTL**: Optional (can be added later)
 
-### 2.3 Create CloudWatch Log Group
+### 3.3 Create CloudWatch Log Group
 
 Create a CloudWatch log group for application logging:
 
@@ -166,7 +207,7 @@ aws logs put-retention-policy \
 - **Retention**: 14 days (adjust as needed)
 - **Region**: `us-west-2`
 
-### 2.4 Verify Resource Creation
+### 3.4 Verify Resource Creation
 
 Verify all resources are created successfully:
 
@@ -181,7 +222,7 @@ aws dynamodb describe-table --table-name iecho-feedback-table-local-dev --region
 aws logs describe-log-groups --log-group-name-prefix /aws/eks/local-dev --region us-west-2
 ```
 
-### 2.5 Get Resource Identifiers
+### 3.5 Get Resource Identifiers
 
 After creating the resources, note down these identifiers for your environment variables:
 
@@ -196,16 +237,16 @@ echo "iecho-feedback-table-local-dev"
 echo "/aws/eks/local-dev/agent-service"
 ```
 
-## Step 3: Clone Repository
+## Step 4: Clone Repository
 
 ```bash
 git clone https://github.com/ASUCICREPO/IECHO-RAG-CHATBOT.git
 cd IECHO-RAG-CHATBOT
 ```
 
-## Step 4: Backend Setup (FastAPI)
+## Step 5: Backend Setup (FastAPI)
 
-### 4.1 Install Python Dependencies
+### 5.1 Install Python Dependencies
 
 ```bash
 cd backend
@@ -221,7 +262,7 @@ venv\Scripts\activate
 pip install -r docker/requirements.txt
 ```
 
-### 4.2 Configure Environment Variables
+### 5.2 Configure Environment Variables
 
 Set environment variables in your terminal (no .env file needed):
 
@@ -238,7 +279,7 @@ export LOG_GROUP=/aws/eks/local-dev/agent-service
 
 **Note**: These environment variables are only for your current terminal session. If you open a new terminal, you'll need to set them again.
 
-### 4.3 Start Backend Server
+### 5.3 Start Backend Server
 
 ```bash
 # From backend/ directory with venv activated
@@ -257,16 +298,16 @@ curl http://localhost:8000/health
 curl http://localhost:8000/status
 ```
 
-## Step 5: Frontend Setup (Next.js)
+## Step 6: Frontend Setup (Next.js)
 
-### 5.1 Install Dependencies
+### 6.1 Install Dependencies
 
 ```bash
 cd frontend
 npm install
 ```
 
-### 5.2 Configure Environment Variables
+### 6.2 Configure Environment Variables
 
 Create a `.env.local` file in the `frontend/` directory:
 
@@ -277,7 +318,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 EOF
 ```
 
-### 5.3 Start Frontend Server
+### 6.3 Start Frontend Server
 
 ```bash
 # From frontend/ directory
@@ -286,9 +327,9 @@ npm run dev
 
 The frontend will be available at `http://localhost:3000`
 
-## Step 6: Testing the Application
+## Step 7: Testing the Application
 
-### 6.1 Test Backend API
+### 7.1 Test Backend API
 
 ```bash
 # Test chat endpoint
@@ -302,22 +343,22 @@ curl -X POST http://localhost:8000/chat-stream \
   -d '{"query": "Tell me about agriculture", "userId": "test-user"}'
 ```
 
-### 6.2 Test Frontend
+### 7.2 Test Frontend
 - Open http://localhost:3000 in your browser
 - Try asking questions about TB or agriculture
 - Check that responses include citations
 
-## Step 7: Development Workflow
+## Step 8: Development Workflow
 
-### 7.1 Backend Changes
+### 8.1 Backend Changes
 - Edit `backend/docker/app/app.py`
 - Restart the Python server to see changes
 
-### 7.2 Frontend Changes
+### 8.2 Frontend Changes
 - Edit files in `frontend/components/` or `frontend/app/`
 - The Next.js dev server auto-reloads on changes
 
-### 7.3 Environment Changes
+### 8.3 Environment Changes
 - Update environment variables in your terminal
 - Update `.env.local` file for frontend
 - Restart both servers to apply changes
