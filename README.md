@@ -8,6 +8,7 @@ An intelligent multi-domain chatbot built with AWS Bedrock, Strands framework, a
 | :-------------------------------------------------- | :------------------------------------------------------ |
 | [High Level Architecture](#high-level-architecture) | High level overview illustrating component interactions |
 | [Deployment](#deployment-guide)                     | How to deploy the project                               |
+| [Local Development](#local-development)             | How to run the project locally for development         |
 | [User Guide](#user-guide)                           | The working solution                                    |
 | [Directories](#directories)                         | General project directory structure                     |
 | [API Documentation](#api-documentation)             | Documentation on the API the project uses               |
@@ -26,6 +27,15 @@ The following architecture diagram illustrates the various AWS components utiliz
 ## Deployment Guide
 
 To deploy this solution, please follow the steps laid out in the [Deployment Guide](./docs/deploymentGuide.md)
+
+## Local Development
+
+To run the project locally for development, please follow the steps in the [Local Development Guide](./docs/localDevelopmentGuide.md). This guide covers:
+
+- Setting up AWS CLI and credentials
+- Creating required AWS resources (Knowledge Base, DynamoDB, CloudWatch)
+- Running the backend and frontend locally
+- Testing the complete application
 
 ## User Guide
 
@@ -46,6 +56,7 @@ Please refer to the [Web App User Guide](./docs/userGuide.md) for instructions o
 ├── docs/
 │   ├── architectureDeepDive.md
 │   ├── deploymentGuide.md
+│   ├── localDevelopmentGuide.md
 │   ├── userGuide.md
 │   ├── APIdoc.md
 │   ├── agentCreation.md
