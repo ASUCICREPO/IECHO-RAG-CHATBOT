@@ -102,14 +102,14 @@ Before running locally, ensure you have these AWS resources deployed:
    ├── uploads/     
    └── processed/   
    ```
-16. Click on folder name `"uploads/"`
+16. Click on folder name `"processed/"` (only for local dev upload directly to processed folder)
 17. Click on `"Upload"` button
 18. Click on `"Add files"`
 19. Select all the files that you want to upload
 20. **Supported formats**: PDF, DOCX, XLSX, PPTX
 21. Click on `"Upload"`, wait for files to be uploaded
 22. Once uploaded, click on `"close"`
-23. Now, your TB and Agriculture documents are uploaded in `"uploads/"` folder
+23. Now, your TB and Agriculture documents are uploaded in `"processed/"` folder
     
 #### Vector Store Bucket
 1. Select `"Vector buckets"` in left pane
