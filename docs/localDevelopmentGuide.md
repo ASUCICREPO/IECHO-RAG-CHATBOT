@@ -213,7 +213,7 @@ Verify all resources are created successfully:
 
 ```bash
 # Check Knowledge Base
-aws bedrock list-knowledge-bases --region us-west-2
+aws bedrock-agent list-knowledge-bases --region us-west-2
 
 # Check DynamoDB table
 aws dynamodb describe-table --table-name iecho-feedback-table-local-dev --region us-west-2
@@ -228,7 +228,7 @@ After creating the resources, note down these identifiers for your environment v
 
 ```bash
 # Get Knowledge Base ID
-aws bedrock list-knowledge-bases --region us-west-2 --query 'knowledgeBaseSummaries[?name==`iECHO-RAG-Knowledge-Base`].knowledgeBaseId' --output text
+aws bedrock-agent list-knowledge-bases --region us-west-2 --query 'knowledgeBaseSummaries[?name==`iECHO-RAG-Knowledge-Base`].knowledgeBaseId' --output text
 
 # Get DynamoDB table name
 echo "iecho-feedback-table-local-dev"
